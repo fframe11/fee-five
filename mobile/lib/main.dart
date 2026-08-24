@@ -4,6 +4,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import 'core/accessibility_notifier.dart';
 import 'features/onboarding/onboarding_screen.dart';
+import 'features/onboarding/profile_selection_screen.dart';
 import 'features/auth/auth_screen.dart';
 import 'features/home/home_screen.dart';
 import 'features/navigation/navigation_screen.dart';
@@ -120,6 +121,7 @@ class AccessibilityAssistantApp extends ConsumerWidget {
       home: const SplashScreen(),
       routes: {
         '/onboarding': (context) => const OnboardingScreen(),
+        '/profile_selection': (context) => const ProfileSelectionScreen(),
         '/auth': (context) => const AuthScreen(),
         '/home': (context) => const HomeScreen(),
         '/navigation': (context) => const NavigationScreen(),

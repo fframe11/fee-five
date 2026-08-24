@@ -61,8 +61,8 @@ class _OnboardingScreenState extends ConsumerState<OnboardingScreen> {
     }
     if (!mounted) return;
     final acc = ref.read(accessibilityProvider);
-    announceSpeech("ยินดีด้วย! บันทึกข้อมูลเริ่มต้นสำเร็จแล้ว กำลังเข้าสู่ขั้นตอนการล็อกอินเข้าสู่ระบบ", acc.voiceEnabled);
-    Navigator.pushReplacementNamed(context, '/auth');
+    announceSpeech("ยินดีด้วย! บันทึกข้อมูลเริ่มต้นสำเร็จแล้ว กรุณาเลือกรูปแบบความต้องการพิเศษต่อ", acc.voiceEnabled);
+    Navigator.pushReplacementNamed(context, '/profile_selection');
   }
 
   @override
