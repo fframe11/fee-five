@@ -130,7 +130,7 @@ class AccessibilityNotifier extends StateNotifier<AccessibilityState> {
         accessibilityMode: mode,
         voiceEnabled: true,
         highContrast: true,
-        fontScale: 1.4,
+        fontScale: 1.0,
       );
       updateWebPreference('high_contrast', 'true');
       updateWebPreference('theme', 'dark');
@@ -148,7 +148,7 @@ class AccessibilityNotifier extends StateNotifier<AccessibilityState> {
         accessibilityMode: mode,
         voiceEnabled: false,
         highContrast: false,
-        fontScale: 1.2,
+        fontScale: 1.0,
       );
       updateWebPreference('high_contrast', 'false');
       updateWebPreference('theme', 'light');
