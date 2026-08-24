@@ -1,0 +1,22 @@
+# Flutter / Dart
+mobile/.dart_tool/
+mobile/build/
+mobile/.flutter-plugins
+mobile/.flutter-plugins-dependencies
+mobile/.packages
+mobile/local.properties
+
+# Python
+**/__pycache__/
+**/*.pyc
+backend/venv/
+backend/.venv/
+.pytest_cache/
+
+# Environment and IDEs
+.env
+.idea/
+.vscode/
+*.tmp
+*.log
+.DS_Store

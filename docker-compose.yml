@@ -1,0 +1,31 @@
+version: '3.8'
+
+services:
+  db:
+    image: postgis/postgis:16-3.4-alpine
+    container_name: postgis_db
+    environment:
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=securepassword123
+      - POSTGRES_DB=accessibility_db
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    restart: always
+
+  api:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: fastapi_api
+    environment:
+      - DATABASE_URL=postgresql://postgres:securepassword123@db:5432/accessibility_db
+    ports:
+      - "8000:8000"
+    depends_on:
+      - db
+    restart: always
+
+volumes:
+  pgdata:

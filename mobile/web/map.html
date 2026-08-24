@@ -1,0 +1,347 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8" />
+    <title>OpenFreeMap Simulator</title>
+    <meta name="viewport" content="initial-scale=1,maximum-scale=1,user-scalable=no" />
+    <script src="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.js"></script>
+    <link href="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.css" rel="stylesheet" />
+    <style>
+        body { margin: 0; padding: 0; }
+        #map { position: absolute; top: 0; bottom: 0; width: 100%; }
+        
+        /* High Contrast Map Filter */
+        .high-contrast-map {
+            filter: contrast(1.5) saturate(1.3);
+        }
+
+        /* Marker Container (Maplibre handles positioning transform) */
+        .marker-icon {
+            width: 44px;
+            height: 44px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            outline: none;
+            cursor: pointer;
+            background: transparent;
+        }
+
+        /* Visual Marker Inner Element (Safe to animate scale/transforms) */
+        .marker-inner {
+            width: 38px;
+            height: 38px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            box-shadow: 0 4px 8px rgba(0,0,0,0.35);
+            border: 3.5px solid white;
+            transition: transform 0.15s ease-out, border-color 0.15s ease-out, box-shadow 0.15s ease-out;
+        }
+        
+        /* Bright yellow focus indicator for accessibility */
+        .marker-icon:focus .marker-inner {
+            border-color: #ffd600 !important;
+            box-shadow: 0 0 0 5px rgba(255, 214, 0, 0.6);
+            transform: scale(1.2);
+        }
+
+        .marker-icon:hover .marker-inner {
+            transform: scale(1.15);
+        }
+
+        /* High contrast specific background colors */
+        .marker-lift {
+            background-color: #0d47a1; /* Dark blue */
+        }
+        
+        .marker-lift-broken {
+            background-color: #b71c1c; /* Crimson red */
+            border-color: #ffcdd2;
+        }
+        
+        .marker-ramp {
+            background-color: #1b5e20; /* Forest green */
+        }
+        
+        .marker-tactile {
+            background-color: #e65100; /* Dark orange */
+        }
+    </style>
+</head>
+<body>
+<div id="map"></div>
+<script>
+    // Default coordinates pointing to Bangkok (Siam area)
+    const bangkok = [100.5348, 13.7461]; 
+    
+    // Parse URL params
+    const urlParams = new URLSearchParams(window.location.search);
+    const isDark = urlParams.get('theme') === 'dark';
+    const isHighContrast = urlParams.get('hc') === 'true';
+    
+    // OpenFreeMap Styles
+    const styleUrl = isDark 
+        ? 'https://tiles.openfreemap.org/styles/dark' 
+        : 'https://tiles.openfreemap.org/styles/bright';
+
+    const map = new maplibregl.Map({
+        container: 'map',
+        style: styleUrl,
+        center: bangkok,
+        zoom: 15
+    });
+
+    if (isHighContrast) {
+        document.getElementById('map').classList.add('high-contrast-map');
+    }
+
+    // Add navigation controls
+    map.addControl(new maplibregl.NavigationControl());
+
+    // User Position Marker (pulsing blue dot)
+    const el = document.createElement('div');
+    el.style.width = '16px';
+    el.style.height = '16px';
+    el.style.borderRadius = '50%';
+    el.style.backgroundColor = '#1565C0';
+    el.style.border = '3px solid white';
+    el.style.boxShadow = '0 0 0 6px rgba(21, 101, 192, 0.4)';
+    el.setAttribute('aria-label', 'ตำแหน่งปัจจุบันของคุณ');
+    
+    new maplibregl.Marker(el)
+        .setLngLat(bangkok)
+        .addTo(map);
+
+    // Mock Accessibility Barriers / Assets
+    const assets = [
+      { type: '♿', name: 'ลิฟต์สถานีบีทีเอสสยาม', coords: [100.5348, 13.7461], desc: 'เปิดใช้งานปกติ ทางออก 3' },
+      { type: '♿', name: 'ลิฟต์ขัดข้อง (ฝั่งเหนือ)', coords: [100.5358, 13.7465], desc: 'ปิดปรับปรุงชั่วคราว มีทางลาดสะพานลอยสำรอง' },
+      { type: '🔺', name: 'ทางลาดพารากอน', coords: [100.5342, 13.7469], desc: 'ทางลาดมาตรฐานความชันต่ำ 5% ปลอดภัย' },
+      { type: '🦯', name: 'เส้นทางคนตาบอด', coords: [100.5335, 13.7455], desc: 'เส้นนำทาง Tactile Path เชื่อมสถานีอำนวยความสะดวก' }
+    ];
+
+    assets.forEach(asset => {
+        const markerDiv = document.createElement('div');
+        markerDiv.className = 'marker-icon';
+        
+        // Accessibility attributes for screen readers
+        markerDiv.setAttribute('tabindex', '0');
+        markerDiv.setAttribute('role', 'button');
+        
+        const innerDiv = document.createElement('div');
+        innerDiv.className = 'marker-inner';
+        
+        let labelText = '';
+        let iconHtml = '';
+        
+        if (asset.type === '♿') {
+            if (asset.name.includes('ขัดข้อง')) {
+                innerDiv.classList.add('marker-lift-broken');
+                iconHtml = '🚫♿'; // blocked wheelchair
+                labelText = `คำเตือนการเข้าถึง: ${asset.name}. รายละเอียด: ${asset.desc}`;
+            } else {
+                innerDiv.classList.add('marker-lift');
+                iconHtml = '♿';
+                labelText = `สิ่งอำนวยความสะดวก: ${asset.name}. รายละเอียด: ${asset.desc}`;
+            }
+        } else if (asset.type === '🔺') {
+            innerDiv.classList.add('marker-ramp');
+            iconHtml = '📐';
+            labelText = `สิ่งอำนวยความสะดวก: ${asset.name}. รายละเอียด: ${asset.desc}`;
+        } else if (asset.type === '🦯') {
+            innerDiv.classList.add('marker-tactile');
+            iconHtml = '🦯';
+            labelText = `เส้นทางเดินคนตาบอด: ${asset.name}. รายละเอียด: ${asset.desc}`;
+        }
+        
+        innerDiv.innerHTML = `<span style="font-size: 18px;">${iconHtml}</span>`;
+        markerDiv.appendChild(innerDiv);
+        
+        markerDiv.setAttribute('aria-label', labelText);
+        markerDiv.setAttribute('title', labelText); // browser tooltip
+        
+        // Keyboard enter / space activation support for screen readers
+        markerDiv.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter' || e.key === ' ') {
+                e.preventDefault();
+                markerDiv.click();
+            }
+        });
+
+        const popup = new maplibregl.Popup({ offset: 25 })
+            .setHTML(`<strong style="font-size:14px;color:#111;">${asset.name}</strong><p style="margin:4px 0 0 0;color:#555;font-size:12px;">${asset.desc}</p>`);
+
+        new maplibregl.Marker(markerDiv)
+            .setLngLat(asset.coords)
+            .setPopup(popup)
+            .addTo(map);
+    });
+
+    // A* Pathfinding Nodes and Edges in Siam Area
+    const NODES = {
+      'paragon_north': { id: 'paragon_north', name: 'สยามพารากอน (ประตูเหนือ)', coords: [100.5342, 13.7469] },
+      'paragon_plaza': { id: 'paragon_plaza', name: 'สยามพารากอน (ลานน้ำพุ)', coords: [100.5348, 13.7461] },
+      'paragon_east': { id: 'paragon_east', name: 'สยามพารากอน (ฝั่งตะวันออก)', coords: [100.5358, 13.7465] },
+      'siam_center_west': { id: 'siam_center_west', name: 'สยามเซ็นเตอร์ (ฝั่งตะวันตก)', coords: [100.5335, 13.7455] },
+      'bts_siam_center': { id: 'bts_siam_center', name: 'สถานีรถไฟฟ้า BTS สยาม', coords: [100.5348, 13.7455] },
+      'wat_pathum': { id: 'wat_pathum', name: 'วัดปทุมวนาราม', coords: [100.5365, 13.7450] },
+      'bts_siam_exit3': { id: 'bts_siam_exit3', name: 'BTS สยาม (ลิฟต์ทางออก 3)', coords: [100.5365, 13.7461] },
+      'centralworld': { id: 'centralworld', name: 'เซ็นทรัลเวิลด์', coords: [100.5380, 13.7450] },
+      'siam_discovery': { id: 'siam_discovery', name: 'สยามดิสคัฟเวอรี', coords: [100.5335, 13.7465] },
+      'siam_square_soi7': { id: 'siam_square_soi7', name: 'สยามสแควร์ ซอย 7', coords: [100.5348, 13.7448] }
+    };
+
+    const EDGES = [
+      { u: 'paragon_north', v: 'paragon_plaza', distance: 100, isRamp: true, isStairs: false, hasBrokenElevator: false },
+      { u: 'paragon_plaza', v: 'paragon_east', distance: 120, isRamp: true, isStairs: false, hasBrokenElevator: false },
+      { u: 'paragon_plaza', v: 'bts_siam_center', distance: 80, isRamp: true, isStairs: false, hasBrokenElevator: false },
+      { u: 'paragon_east', v: 'bts_siam_exit3', distance: 90, isRamp: true, isStairs: false, hasBrokenElevator: false },
+      { u: 'bts_siam_center', v: 'bts_siam_exit3', distance: 150, isRamp: false, isStairs: false, hasBrokenElevator: true },
+      { u: 'bts_siam_center', v: 'siam_center_west', distance: 130, isRamp: true, isStairs: false, hasBrokenElevator: false },
+      { u: 'siam_center_west', v: 'siam_discovery', distance: 120, isRamp: true, isStairs: false, hasBrokenElevator: false },
+      { u: 'siam_center_west', v: 'siam_square_soi7', distance: 100, isRamp: false, isStairs: true, hasBrokenElevator: false },
+      { u: 'bts_siam_exit3', v: 'wat_pathum', distance: 130, isRamp: true, isStairs: false, hasBrokenElevator: false },
+      { u: 'bts_siam_exit3', v: 'centralworld', distance: 180, isRamp: true, isStairs: false, hasBrokenElevator: false }
+    ];
+
+    function getHeuristic(nodeA, nodeB) {
+      var lat1 = nodeA.coords[1];
+      var lon1 = nodeA.coords[0];
+      var lat2 = nodeB.coords[1];
+      var lon2 = nodeB.coords[0];
+      var dLat = (lat2 - lat1) * Math.PI / 180;
+      var dLon = (lon2 - lon1) * Math.PI / 180;
+      var a = Math.sin(dLat/2) * Math.sin(dLat/2) +
+              Math.cos(lat1*Math.PI/180) * Math.cos(lat2*Math.PI/180) *
+              Math.sin(dLon/2) * Math.sin(dLon/2);
+      var c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+      return 6371000 * c;
+    }
+
+    function findShortestRoute(startNodeId, endNodeId, options) {
+      var openSet = [startNodeId];
+      var cameFrom = {};
+      var gScore = {};
+      var fScore = {};
+      
+      Object.keys(NODES).forEach(function(id) {
+        gScore[id] = Infinity;
+        fScore[id] = Infinity;
+      });
+      
+      gScore[startNodeId] = 0;
+      fScore[startNodeId] = getHeuristic(NODES[startNodeId], NODES[endNodeId]);
+      
+      while (openSet.length > 0) {
+        var currentId = openSet.reduce(function(lowest, id) {
+          return (fScore[id] < fScore[lowest]) ? id : lowest;
+        }, openSet[0]);
+        
+        if (currentId === endNodeId) {
+          var path = [];
+          var curr = currentId;
+          while (curr !== undefined) {
+            path.push(NODES[curr].coords);
+            curr = cameFrom[curr];
+          }
+          return path.reverse();
+        }
+        
+        openSet = openSet.filter(function(id) { return id !== currentId; });
+        
+        var neighbors = [];
+        EDGES.forEach(function(edge) {
+          if (edge.u === currentId) {
+            neighbors.push({ id: edge.v, edge: edge });
+          } else if (edge.v === currentId) {
+            neighbors.push({ id: edge.u, edge: edge });
+          }
+        });
+        
+        neighbors.forEach(function(neighbor) {
+          var neighborId = neighbor.id;
+          var edge = neighbor.edge;
+          
+          var weight = edge.distance;
+          if (options.wheelchairMode && edge.isStairs) {
+            weight += 5000;
+          }
+          if (options.avoidBrokenElevator && edge.hasBrokenElevator) {
+            weight += 10000;
+          }
+          
+          var tentativeGScore = gScore[currentId] + weight;
+          if (tentativeGScore < gScore[neighborId]) {
+            cameFrom[neighborId] = currentId;
+            gScore[neighborId] = tentativeGScore;
+            fScore[neighborId] = gScore[neighborId] + getHeuristic(NODES[neighborId], NODES[endNodeId]);
+            
+            if (!openSet.includes(neighborId)) {
+              openSet.push(neighborId);
+            }
+          }
+        });
+      }
+      return [];
+    }
+
+    // Handle route display animation
+    window.addEventListener('message', (event) => {
+        const data = event.data;
+        if (data.type === 'DRAW_ROUTE') {
+            const startId = data.startNode || 'paragon_plaza';
+            const endId = data.endNode || 'bts_siam_center';
+            const options = {
+                wheelchairMode: data.wheelchairMode !== false,
+                avoidBrokenElevator: data.avoidBrokenElevator === true
+            };
+            
+            const routeCoords = findShortestRoute(startId, endId, options);
+            
+            if (routeCoords.length === 0) {
+                console.warn("No route found between", startId, "and", endId);
+                return;
+            }
+
+            if (map.getSource('route')) {
+                map.removeLayer('route');
+                map.removeSource('route');
+            }
+
+            map.addSource('route', {
+                'type': 'geojson',
+                'data': {
+                    'type': 'Feature',
+                    'properties': {},
+                    'geometry': {
+                        'type': 'LineString',
+                        'coordinates': routeCoords
+                    }
+                }
+            });
+
+            map.addLayer({
+                'id': 'route',
+                'type': 'line',
+                'source': 'route',
+                'layout': {
+                    'line-join': 'round',
+                    'line-cap': 'round'
+                },
+                'paint': {
+                    'line-color': '#1565C0',
+                    'line-width': 6,
+                    'line-opacity': 0.8
+                }
+            });
+
+            // Center map on route
+            const bounds = routeCoords.reduce((b, coord) => b.extend(coord), new maplibregl.LngLatBounds(routeCoords[0], routeCoords[0]));
+            map.fitBounds(bounds, { padding: 80 });
+        }
+    });
+</script>
+</body>
+</html>
