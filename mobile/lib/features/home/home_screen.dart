@@ -424,6 +424,64 @@ class _HomeTabContentState extends ConsumerState<_HomeTabContent> {
     });
   }
 
+  void _showQuickMessageDialog(BuildContext context, String message, AccessibilityState acc) {
+    showDialog(
+      context: context,
+      builder: (context) {
+        final isHighContrast = acc.highContrast;
+        return Dialog(
+          backgroundColor: isHighContrast ? Colors.black : Colors.white,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(20),
+            side: isHighContrast ? const BorderSide(color: Colors.white, width: 3) : BorderSide.none,
+          ),
+          child: Padding(
+            padding: const EdgeInsets.all(24.0),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Align(
+                  alignment: Alignment.topRight,
+                  child: IconButton(
+                    icon: Icon(Icons.close, size: 32, color: isHighContrast ? Colors.white : Colors.black),
+                    onPressed: () => Navigator.pop(context),
+                  ),
+                ),
+                const SizedBox(height: 16),
+                Text(
+                  message,
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                    fontSize: 28 * acc.fontScale,
+                    fontWeight: FontWeight.bold,
+                    color: isHighContrast ? Colors.yellow : Colors.blue[900],
+                  ),
+                ),
+                const SizedBox(height: 32),
+                SizedBox(
+                  height: 54,
+                  child: ElevatedButton(
+                    onPressed: () => Navigator.pop(context),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: isHighContrast ? Colors.white : Colors.blue[800],
+                      foregroundColor: isHighContrast ? Colors.black : Colors.white,
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                    ),
+                    child: Text(
+                      'ปิดหน้าต่าง',
+                      style: TextStyle(fontSize: 18 * acc.fontScale, fontWeight: FontWeight.bold),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final acc = ref.watch(accessibilityProvider);
@@ -698,54 +756,93 @@ class _HomeTabContentState extends ConsumerState<_HomeTabContent> {
         ],
       );
     } else {
+      final quickMessages = [
+        'ขอยืนยันจุดขึ้นรถไฟฟ้า / ลิฟต์โดยสาร',
+        'ช่วยนำทางไปห้องน้ำผู้พิการหน่อยครับ',
+        'ต้องการติดต่อเจ้าหน้าที่สถานีด่วน',
+        'ขอทางเข้าจุดบริการรถสาธารณะ / แท็กซี่',
+      ];
+
       return Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          Expanded(
-            child: Card(
-              color: isHighContrast ? Colors.black : Colors.purple[50],
-              shape: isHighContrast ? const RoundedRectangleBorder(side: BorderSide(color: Colors.white)) : null,
-              child: Padding(
-                padding: const EdgeInsets.all(16.0),
-                child: Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    const Icon(Icons.front_hand, size: 48, color: Colors.purple),
-                    const SizedBox(height: 16.0),
-                    Text(
-                      'การตรวจจับท่าทาง (Gesture SOS)',
-                      style: TextStyle(fontSize: 18 * acc.fontScale, fontWeight: FontWeight.bold, color: isHighContrast ? Colors.white : Colors.purple[900]),
-                    ),
-                    const SizedBox(height: 8.0),
-                    Text(
-                      'เปิดกล้องหน้าค้างไว้และทำท่ากำมือแบมือ 3 วินาทีเพื่อเปิดใช้งาน SOS โดยไม่ต้องออกเสียง',
-                      textAlign: TextAlign.center,
-                      style: TextStyle(fontSize: 14 * acc.fontScale, color: isHighContrast ? Colors.white70 : Colors.black87),
-                    ),
-                  ],
-                ),
+          Padding(
+            padding: const EdgeInsets.only(bottom: 12.0),
+            child: Text(
+              '💬 แตะแสดงข้อความด่วน (Quick Cards)',
+              style: TextStyle(
+                fontSize: 16 * acc.fontScale,
+                fontWeight: FontWeight.bold,
+                color: isHighContrast ? Colors.white : Colors.purple[900],
               ),
+            ),
+          ),
+          Expanded(
+            child: GridView.builder(
+              physics: const NeverScrollableScrollPhysics(),
+              gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                crossAxisCount: 2,
+                crossAxisSpacing: 12,
+                mainAxisSpacing: 12,
+                childAspectRatio: 1.35,
+              ),
+              itemCount: quickMessages.length,
+              itemBuilder: (context, index) {
+                final msg = quickMessages[index];
+                return Card(
+                  margin: EdgeInsets.zero,
+                  color: isHighContrast ? Colors.black : Colors.purple[50],
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(16),
+                    side: isHighContrast ? const BorderSide(color: Colors.white, width: 2) : BorderSide.none,
+                  ),
+                  elevation: isHighContrast ? 0 : 2,
+                  child: InkWell(
+                    onTap: () {
+                      _triggerHaptic(acc);
+                      _showQuickMessageDialog(context, msg, acc);
+                    },
+                    borderRadius: BorderRadius.circular(16),
+                    child: Padding(
+                      padding: const EdgeInsets.all(12.0),
+                      child: Center(
+                        child: Text(
+                          msg,
+                          textAlign: TextAlign.center,
+                          style: TextStyle(
+                            fontSize: 14 * acc.fontScale,
+                            fontWeight: FontWeight.bold,
+                            color: isHighContrast ? Colors.white : Colors.purple[900],
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                );
+              },
             ),
           ),
           const SizedBox(height: 16.0),
           Semantics(
             button: true,
             label: 'เปิดกล้องตรวจจับ SOS ด้วยมือ',
-            child: ElevatedButton(
-              onPressed: () {
-                _triggerHaptic(acc);
-                widget.onNavigateTab(3); // SOS tab
-              },
-              style: ElevatedButton.styleFrom(
-                backgroundColor: isHighContrast ? Colors.black : Colors.purple[800],
-                foregroundColor: Colors.white,
-                side: isHighContrast ? const BorderSide(color: Colors.white, width: 2) : null,
-                padding: const EdgeInsets.symmetric(vertical: 24.0),
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-              ),
-              child: Text(
-                'เปิดกล้องตรวจจับ SOS ด้วยมือ',
-                style: TextStyle(fontSize: 18 * acc.fontScale, fontWeight: FontWeight.bold),
+            child: SizedBox(
+              height: 54,
+              child: ElevatedButton(
+                onPressed: () {
+                  _triggerHaptic(acc);
+                  widget.onNavigateTab(3); // SOS tab
+                },
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: isHighContrast ? Colors.black : Colors.purple[800],
+                  foregroundColor: Colors.white,
+                  side: isHighContrast ? const BorderSide(color: Colors.white, width: 2) : null,
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                ),
+                child: Text(
+                  'เปิดกล้อง SOS',
+                  style: TextStyle(fontSize: 18 * acc.fontScale, fontWeight: FontWeight.bold),
+                ),
               ),
             ),
           ),

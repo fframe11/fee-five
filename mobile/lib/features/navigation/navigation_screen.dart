@@ -1326,6 +1326,42 @@ class _NavigationScreenState extends ConsumerState<NavigationScreen> with Ticker
                 ),
               ),
             ),
+          
+          // Physical Zoom Controls for Wheelchair Mode (thumb zone / one handed zoom)
+          if (acc.accessibilityMode == 'wheelchair')
+            Positioned(
+              right: 16,
+              bottom: 100,
+              child: Column(
+                children: [
+                  FloatingActionButton.small(
+                    heroTag: 'map_zoom_in_fab',
+                    onPressed: () {
+                      if (acc.hapticEnabled) HapticFeedback.lightImpact();
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(content: Text('กำลังขยายแผนที่ (Zoom In)')),
+                      );
+                    },
+                    backgroundColor: isHighContrast ? Colors.white : Colors.blue[900],
+                    foregroundColor: isHighContrast ? Colors.black : Colors.white,
+                    child: const Icon(Icons.add, size: 24),
+                  ),
+                  const SizedBox(height: 8),
+                  FloatingActionButton.small(
+                    heroTag: 'map_zoom_out_fab',
+                    onPressed: () {
+                      if (acc.hapticEnabled) HapticFeedback.lightImpact();
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(content: Text('กำลังย่อแผนที่ (Zoom Out)')),
+                      );
+                    },
+                    backgroundColor: isHighContrast ? Colors.white : Colors.blue[900],
+                    foregroundColor: isHighContrast ? Colors.black : Colors.white,
+                    child: const Icon(Icons.remove, size: 24),
+                  ),
+                ],
+              ),
+            ),
         ],
       ),
     );

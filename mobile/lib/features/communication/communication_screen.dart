@@ -368,14 +368,14 @@ class _CommunicationScreenState extends ConsumerState<CommunicationScreen> with 
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  "🟢 ระบบตรวจจับแปลภาษามือสด (Live Gestures)",
+                  "💬 ผลการแปลภาษามือ",
                   style: TextStyle(
-                    fontSize: 13 * acc.fontScale,
+                    fontSize: 14 * acc.fontScale,
                     fontWeight: FontWeight.bold,
-                    color: isHighContrast ? Colors.white70 : Colors.blue[800],
+                    color: isHighContrast ? Colors.white : Colors.blue[900],
                   ),
                 ),
-                const SizedBox(height: 12),
+                const SizedBox(height: 16),
                 
                 // Translated text output
                 Expanded(

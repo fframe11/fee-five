@@ -391,36 +391,57 @@ class _VisionAssistScreenState extends ConsumerState<VisionAssistScreen> with Ti
                   Positioned(
                     top: 16,
                     left: 16,
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                          decoration: BoxDecoration(
-                            color: Colors.black54,
-                            borderRadius: BorderRadius.circular(8),
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                      decoration: BoxDecoration(
+                        color: isHighContrast ? Colors.black : Colors.blue[900]?.withOpacity(0.8),
+                        border: isHighContrast ? Border.all(color: Colors.white, width: 1.5) : null,
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      child: Row(
+                        children: [
+                          const Icon(Icons.lens, color: Colors.red, size: 12),
+                          const SizedBox(width: 8),
+                          Text(
+                            'กล้อง AI เปิดใช้งานสแกนอยู่',
+                            style: TextStyle(
+                              color: Colors.white,
+                              fontSize: 14 * acc.fontScale,
+                              fontWeight: FontWeight.bold,
+                            ),
                           ),
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text('Model: YOLOv8-Nano', style: TextStyle(color: Colors.cyanAccent, fontSize: 13 * acc.fontScale, fontWeight: FontWeight.bold)),
-                              Text('FPS: 27.4', style: TextStyle(color: Colors.greenAccent, fontSize: 12 * acc.fontScale)),
-                            ],
+                        ],
+                      ),
+                    ),
+                  ),
+                  
+                if (_isScanning)
+                  Positioned(
+                    left: 16,
+                    right: 16,
+                    bottom: 80,
+                    child: Card(
+                      color: isHighContrast ? Colors.black : Colors.red[900]?.withOpacity(0.9),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12),
+                        side: isHighContrast ? const BorderSide(color: Colors.white, width: 2) : BorderSide.none,
+                      ),
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+                        child: Text(
+                          _simulatedProximity >= 0.5
+                              ? '⚠️ ตรวจพบ: สิ่งกีดขวางระดับหัว ระยะใกล้!'
+                              : (_simulatedProximity >= 0.3
+                                  ? '⚠️ ตรวจพบ: อุปสรรคบนพื้นข้างหน้า!'
+                                  : '🟢 พื้นผิวราบรื่น / ทางสะดวก'),
+                          textAlign: TextAlign.center,
+                          style: TextStyle(
+                            fontSize: 18 * acc.fontScale,
+                            fontWeight: FontWeight.bold,
+                            color: Colors.white,
                           ),
                         ),
-                        const SizedBox(height: 8),
-                        Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-                          decoration: BoxDecoration(
-                            color: Colors.black54,
-                            borderRadius: BorderRadius.circular(16),
-                          ),
-                          child: Text(
-                            _simulatedProximity.toStringAsFixed(2),
-                            style: TextStyle(color: Colors.white, fontSize: 13 * acc.fontScale, fontWeight: FontWeight.bold),
-                          ),
-                        ),
-                      ],
+                      ),
                     ),
                   ),
                   

@@ -304,17 +304,21 @@ class _GestureSosScreenState extends ConsumerState<GestureSosScreen> with Ticker
                             },
                           ),
                           const SizedBox(height: 32),
-                          ElevatedButton.icon(
-                            onPressed: _cancelSOS,
-                            icon: const Icon(Icons.cancel, size: 32),
-                            label: Text(
-                              'ยกเลิก (Cancel)',
-                              style: TextStyle(fontSize: 24 * acc.fontScale),
-                            ),
-                            style: ElevatedButton.styleFrom(
-                              backgroundColor: Colors.white,
-                              foregroundColor: Colors.red,
-                              padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 16),
+                          SizedBox(
+                            width: 250,
+                            height: 60,
+                            child: ElevatedButton.icon(
+                              onPressed: _cancelSOS,
+                              icon: const Icon(Icons.cancel, size: 32),
+                              label: Text(
+                                'ยกเลิกภัย (Cancel)',
+                                style: TextStyle(fontSize: 22 * acc.fontScale, fontWeight: FontWeight.bold),
+                              ),
+                              style: ElevatedButton.styleFrom(
+                                backgroundColor: isHighContrast ? Colors.white : Colors.red[800],
+                                foregroundColor: isHighContrast ? Colors.black : Colors.white,
+                                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                              ),
                             ),
                           ),
                         ],
@@ -328,17 +332,21 @@ class _GestureSosScreenState extends ConsumerState<GestureSosScreen> with Ticker
           if (!_isCountingDown && _isSearching)
             Padding(
               padding: const EdgeInsets.all(16.0),
-              child: ElevatedButton.icon(
-                onPressed: _triggerGestureSOS,
-                icon: const Icon(Icons.play_arrow_rounded),
-                label: Text(
-                  'จำลองการตรวจจับท่าทางฉุกเฉิน (Simulate Gesture)',
-                  style: TextStyle(fontSize: 16 * acc.fontScale),
-                ),
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: isHighContrast ? Colors.white : Colors.red[900],
-                  foregroundColor: isHighContrast ? Colors.black : Colors.white,
-                  padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 14),
+              child: SizedBox(
+                height: 54,
+                width: double.infinity,
+                child: ElevatedButton.icon(
+                  onPressed: _triggerGestureSOS,
+                  icon: const Icon(Icons.play_arrow_rounded),
+                  label: Text(
+                    'จำลองสัญญาณมือฉุกเฉิน (Simulate)',
+                    style: TextStyle(fontSize: 16 * acc.fontScale, fontWeight: FontWeight.bold),
+                  ),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: isHighContrast ? Colors.white : Colors.red[900],
+                    foregroundColor: isHighContrast ? Colors.black : Colors.white,
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                  ),
                 ),
               ),
             ),

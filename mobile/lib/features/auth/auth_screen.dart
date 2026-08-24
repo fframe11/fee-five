@@ -196,25 +196,26 @@ class _AuthScreenState extends ConsumerState<AuthScreen> {
                 Semantics(
                   label: 'โลโก้แอปพลิเคชัน',
                   child: Text(
-                    'Accessibility Assistant',
+                    'FeeFive',
                     textAlign: TextAlign.center,
                     style: TextStyle(
-                      fontSize: 28 * acc.fontScale,
+                      fontSize: 32 * acc.fontScale,
                       fontWeight: FontWeight.bold,
                       color: isHighContrast ? Colors.white : Colors.blue[900],
+                      letterSpacing: 1.5,
                     ),
                   ),
                 ),
                 const SizedBox(height: 8.0),
                 Text(
-                  'เพื่อสังคมที่เท่าเทียมและปลอดภัย',
+                  'ระบบนำทางและความช่วยเหลือผู้พิการ',
                   textAlign: TextAlign.center,
                   style: TextStyle(
-                    fontSize: 16 * acc.fontScale,
+                    fontSize: 15 * acc.fontScale,
                     color: isHighContrast ? Colors.white70 : Colors.grey[600],
                   ),
                 ),
-                const SizedBox(height: 48.0),
+                const SizedBox(height: 32.0),
                 Semantics(
                   label: 'ช่องกรอกอีเมล',
                   child: TextFormField(
@@ -222,13 +223,16 @@ class _AuthScreenState extends ConsumerState<AuthScreen> {
                     keyboardType: TextInputType.emailAddress,
                     decoration: InputDecoration(
                       labelText: 'อีเมล (Email)',
-                      border: const OutlineInputBorder(),
+                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                      contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 18),
                       labelStyle: TextStyle(
                         color: isHighContrast ? Colors.white : Colors.black,
                       ),
                       enabledBorder: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(12),
                         borderSide: BorderSide(
-                          color: isHighContrast ? Colors.white : Colors.grey,
+                          color: isHighContrast ? Colors.white : Colors.grey[400]!,
+                          width: 1.5,
                         ),
                       ),
                     ),
@@ -254,13 +258,16 @@ class _AuthScreenState extends ConsumerState<AuthScreen> {
                     obscureText: _obscurePassword,
                     decoration: InputDecoration(
                       labelText: 'รหัสผ่าน (Password)',
-                      border: const OutlineInputBorder(),
+                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                      contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 18),
                       labelStyle: TextStyle(
                         color: isHighContrast ? Colors.white : Colors.black,
                       ),
                       enabledBorder: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(12),
                         borderSide: BorderSide(
-                          color: isHighContrast ? Colors.white : Colors.grey,
+                          color: isHighContrast ? Colors.white : Colors.grey[400]!,
+                          width: 1.5,
                         ),
                       ),
                       suffixIcon: IconButton(
@@ -290,30 +297,35 @@ class _AuthScreenState extends ConsumerState<AuthScreen> {
                     },
                   ),
                 ),
-                const SizedBox(height: 32.0),
+                const SizedBox(height: 24.0),
                 if (_isLoading)
                   const Center(child: CircularProgressIndicator())
                 else
                   Semantics(
                     button: true,
                     label: _isLogin ? 'ปุ่มเข้าสู่ระบบ' : 'ปุ่มลงทะเบียน',
-                    child: ElevatedButton(
-                      onPressed: _submit,
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: isHighContrast ? Colors.white : Colors.blue[800],
-                        foregroundColor: isHighContrast ? Colors.black : Colors.white,
-                        padding: const EdgeInsets.symmetric(vertical: 16.0),
-                      ),
-                      child: Text(
-                        _isLogin ? 'เข้าสู่ระบบ' : 'ลงทะเบียน',
-                        style: TextStyle(
-                          fontSize: 18 * acc.fontScale,
-                          fontWeight: FontWeight.bold,
+                    child: SizedBox(
+                      height: 54,
+                      child: ElevatedButton(
+                        onPressed: _submit,
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: isHighContrast ? Colors.white : Colors.blue[800],
+                          foregroundColor: isHighContrast ? Colors.black : Colors.white,
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                        ),
+                        child: Text(
+                          _isLogin ? 'เข้าสู่ระบบ' : 'ลงทะเบียน',
+                          style: TextStyle(
+                            fontSize: 18 * acc.fontScale,
+                            fontWeight: FontWeight.bold,
+                          ),
                         ),
                       ),
                     ),
                   ),
-                const SizedBox(height: 16.0),
+                const SizedBox(height: 12.0),
                 Semantics(
                   button: true,
                   label: 'สลับโหมดเข้าสู่ระบบหรือลงทะเบียน',
@@ -331,33 +343,41 @@ class _AuthScreenState extends ConsumerState<AuthScreen> {
                     ),
                     child: Text(
                       _isLogin
-                          ? 'ยังไม่มีบัญชีใช่หรือไม่? ลงทะเบียนที่นี่'
-                          : 'มีบัญชีอยู่แล้วใช่หรือไม่? เข้าสู่ระบบที่นี่',
+                          ? 'ยังไม่มีบัญชี? สมัครใช้งานที่นี่'
+                          : 'มีบัญชีอยู่แล้ว? เข้าสู่ระบบที่นี่',
                       style: TextStyle(
-                        fontSize: 16 * acc.fontScale,
+                        fontSize: 15 * acc.fontScale,
+                        fontWeight: FontWeight.w600,
                       ),
                     ),
                   ),
                 ),
-                const SizedBox(height: 16.0),
+                const SizedBox(height: 8.0),
                 Semantics(
                   button: true,
                   label: 'ปุ่มใช้งานในฐานะผู้มาเยือน',
-                  child: OutlinedButton(
-                    onPressed: () {
-                      Navigator.pushReplacementNamed(context, '/home');
-                    },
-                    style: OutlinedButton.styleFrom(
-                      side: BorderSide(
-                        color: isHighContrast ? Colors.white : Colors.blue,
+                  child: SizedBox(
+                    height: 54,
+                    child: OutlinedButton(
+                      onPressed: () {
+                        Navigator.pushReplacementNamed(context, '/home');
+                      },
+                      style: OutlinedButton.styleFrom(
+                        side: BorderSide(
+                          color: isHighContrast ? Colors.white : Colors.blue,
+                          width: 1.5,
+                        ),
+                        foregroundColor: isHighContrast ? Colors.white : Colors.blue,
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12),
+                        ),
                       ),
-                      foregroundColor: isHighContrast ? Colors.white : Colors.blue,
-                      padding: const EdgeInsets.symmetric(vertical: 16.0),
-                    ),
-                    child: Text(
-                      'ใช้งานในฐานะผู้มาเยือน',
-                      style: TextStyle(
-                        fontSize: 16 * acc.fontScale,
+                      child: Text(
+                        'ใช้งานแบบผู้มาเยือน',
+                        style: TextStyle(
+                          fontSize: 16 * acc.fontScale,
+                          fontWeight: FontWeight.bold,
+                        ),
                       ),
                     ),
                   ),

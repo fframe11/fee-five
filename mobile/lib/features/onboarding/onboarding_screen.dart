@@ -19,23 +19,20 @@ class _OnboardingScreenState extends ConsumerState<OnboardingScreen> {
   final List<OnboardingSlideData> _slides = [
     OnboardingSlideData(
       icon: Icons.remove_red_eye_rounded,
-      title: "ระบบคำแนะนำทางสายตา",
-      description:
-          "ตรวจจับสิ่งกีดขวางระดับหัวและพื้นผิวต่างระดับแบบเรียลไทม์ด้วยกล้อง AI พร้อมคำสั่งแจ้งเตือนเสียงและสั่นเตือน เพื่อความปลอดภัยสูงสุดในทุกย่างก้าว",
+      title: "กล้องตรวจสิ่งกีดขวาง AI",
+      description: "วิเคราะห์ภาพและส่งเสียงเตือนสิ่งกีดขวางบนพื้นแบบเรียลไทม์",
       color: const Color(0xFF0D47A1), // Colors.blue[900]
     ),
     OnboardingSlideData(
       icon: Icons.accessible_rounded,
-      title: "เส้นทางอำนวยความสะดวก",
-      description:
-          "สืบค้นและหลีกเลี่ยงสิ่งกีดขวาง แผงลอย ลิฟต์โดยสารสถานีรถไฟฟ้าขัดข้อง หรือเส้นทางที่วีลแชร์ผ่านไม่ได้ด้วยความแม่นยำสูง พร้อมระบบนำทางด้วยเสียง",
+      title: "แผนที่นำทางวีลแชร์",
+      description: "ค้นหาลิฟต์ ทางลาด และเลี่ยงอุปสรรคเพื่ออำนวยความสะดวก",
       color: const Color(0xFF00695C), // Colors.teal[800]
     ),
     OnboardingSlideData(
       icon: Icons.gesture_rounded,
-      title: "ขอความช่วยเหลือฉุกเฉิน",
-      description:
-          "ส่งสัญญาณฉุกเฉิน SOS ไปยังครอบครัวหรือเจ้าหน้าที่ทันทีด้วยการขยับมือผ่านกล้องหน้าโดยไม่ต้องออกเสียงพูด เพื่อความรวดเร็วและปลอดภัย",
+      title: "แจ้งเหตุฉุกเฉิน SOS ด่วน",
+      description: "ส่งตำแหน่ง SOS ให้คนสนิททันทีด้วยการโบกมือผ่านกล้องหน้า",
       color: const Color(0xFF6A1B9A), // Colors.purple[800]
     ),
   ];

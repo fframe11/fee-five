@@ -160,92 +160,124 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
             ),
             const SizedBox(height: 24.0),
 
-            // Language Selection
-            Text(
-              'ภาษา (Language)',
-              style: TextStyle(fontSize: 16 * acc.fontScale, fontWeight: FontWeight.bold, color: isHighContrast ? Colors.white : Colors.black87),
-            ),
-            const SizedBox(height: 8.0),
-            DropdownButtonFormField<String>(
-              value: _selectedLanguage,
-              decoration: const InputDecoration(
-                border: OutlineInputBorder(),
+            // Profile preferences card
+            Card(
+              color: isHighContrast ? Colors.black : Colors.white,
+              shape: isHighContrast ? const RoundedRectangleBorder(side: BorderSide(color: Colors.white)) : null,
+              child: Padding(
+                padding: const EdgeInsets.all(16.0),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'ภาษา (Language)',
+                      style: TextStyle(fontSize: 16 * acc.fontScale, fontWeight: FontWeight.bold, color: isHighContrast ? Colors.white : Colors.black87),
+                    ),
+                    const SizedBox(height: 8.0),
+                    DropdownButtonFormField<String>(
+                      value: _selectedLanguage,
+                      decoration: const InputDecoration(
+                        border: OutlineInputBorder(),
+                        contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                      ),
+                      dropdownColor: isHighContrast ? Colors.black : Colors.white,
+                      style: TextStyle(color: isHighContrast ? Colors.white : Colors.black, fontSize: 16 * acc.fontScale),
+                      items: const [
+                        DropdownMenuItem(value: 'th', child: Text('ภาษาไทย')),
+                        DropdownMenuItem(value: 'en', child: Text('English')),
+                      ],
+                      onChanged: (val) {
+                        if (val != null) {
+                          setState(() {
+                            _selectedLanguage = val;
+                          });
+                        }
+                      },
+                    ),
+                    const SizedBox(height: 20.0),
+                    Text(
+                      'เลือกโหมดการช่วยเหลือ',
+                      style: TextStyle(fontSize: 16 * acc.fontScale, fontWeight: FontWeight.bold, color: isHighContrast ? Colors.white : Colors.black87),
+                    ),
+                    const SizedBox(height: 8.0),
+                    DropdownButtonFormField<String>(
+                      value: acc.accessibilityMode,
+                      decoration: const InputDecoration(
+                        border: OutlineInputBorder(),
+                        contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                      ),
+                      dropdownColor: isHighContrast ? Colors.black : Colors.white,
+                      style: TextStyle(color: isHighContrast ? Colors.white : Colors.black, fontSize: 16 * acc.fontScale),
+                      items: const [
+                        DropdownMenuItem(value: 'visual', child: Text('👁 ความช่วยเหลือทางสายตา')),
+                        DropdownMenuItem(value: 'wheelchair', child: Text('♿ วีลแชร์ / การเคลื่อนไหว')),
+                        DropdownMenuItem(value: 'speech_hearing', child: Text('🖐 การพูดและได้ยิน')),
+                      ],
+                      onChanged: (val) {
+                        if (val != null) notifier.setMode(val);
+                      },
+                    ),
+                  ],
+                ),
               ),
-              dropdownColor: isHighContrast ? Colors.black : Colors.white,
-              style: TextStyle(color: isHighContrast ? Colors.white : Colors.black, fontSize: 16 * acc.fontScale),
-              items: const [
-                DropdownMenuItem(value: 'th', child: Text('ภาษาไทย')),
-                DropdownMenuItem(value: 'en', child: Text('English')),
-              ],
-              onChanged: (val) {
-                if (val != null) {
-                  setState(() {
-                    _selectedLanguage = val;
-                  });
-                }
-              },
             ),
-            const Divider(height: 32.0),
+            const SizedBox(height: 16.0),
 
-            // Mode Select Dropdown
-            Text(
-              'เลือกโหมดการช่วยเหลือ',
-              style: TextStyle(fontSize: 16 * acc.fontScale, fontWeight: FontWeight.bold, color: isHighContrast ? Colors.white : Colors.black87),
-            ),
-            const SizedBox(height: 8.0),
-            DropdownButtonFormField<String>(
-              value: acc.accessibilityMode,
-              decoration: const InputDecoration(
-                border: OutlineInputBorder(),
+            // System settings triggers card
+            Card(
+              color: isHighContrast ? Colors.black : Colors.white,
+              shape: isHighContrast ? const RoundedRectangleBorder(side: BorderSide(color: Colors.white)) : null,
+              child: Column(
+                children: [
+                  SwitchListTile(
+                    title: Text('เปิดระบบคำแนะนำด้วยเสียง (Voice)', style: TextStyle(fontSize: 16 * acc.fontScale, color: isHighContrast ? Colors.white : Colors.black)),
+                    value: acc.voiceEnabled,
+                    onChanged: notifier.toggleVoice,
+                    activeColor: isHighContrast ? Colors.white : Colors.blue,
+                  ),
+                  SwitchListTile(
+                    title: Text('เปิดการสั่นตอบสนอง (Haptic)', style: TextStyle(fontSize: 16 * acc.fontScale, color: isHighContrast ? Colors.white : Colors.black)),
+                    value: acc.hapticEnabled,
+                    onChanged: notifier.toggleHaptic,
+                    activeColor: isHighContrast ? Colors.white : Colors.blue,
+                  ),
+                  SwitchListTile(
+                    title: Text('โหมดสีคอนทราสต์สูง (High Contrast)', style: TextStyle(fontSize: 16 * acc.fontScale, color: isHighContrast ? Colors.white : Colors.black)),
+                    value: acc.highContrast,
+                    onChanged: notifier.toggleHighContrast,
+                    activeColor: isHighContrast ? Colors.white : Colors.blue,
+                  ),
+                ],
               ),
-              dropdownColor: isHighContrast ? Colors.black : Colors.white,
-              style: TextStyle(color: isHighContrast ? Colors.white : Colors.black, fontSize: 16 * acc.fontScale),
-              items: const [
-                DropdownMenuItem(value: 'visual', child: Text('👁 ความช่วยเหลือทางสายตา')),
-                DropdownMenuItem(value: 'wheelchair', child: Text('♿ วีลแชร์ / การเคลื่อนไหว')),
-                DropdownMenuItem(value: 'speech_hearing', child: Text('🖐 การพูดและได้ยิน')),
-              ],
-              onChanged: (val) {
-                if (val != null) notifier.setMode(val);
-              },
             ),
-            const Divider(height: 32.0),
+            const SizedBox(height: 16.0),
 
-            // Toggle Switches
-            SwitchListTile(
-              title: Text('เปิดระบบคำแนะนำด้วยเสียง (Voice)', style: TextStyle(fontSize: 16 * acc.fontScale, color: isHighContrast ? Colors.white : Colors.black)),
-              value: acc.voiceEnabled,
-              onChanged: notifier.toggleVoice,
-              activeColor: isHighContrast ? Colors.white : Colors.blue,
-            ),
-            SwitchListTile(
-              title: Text('เปิดการสั่นตอบสนอง (Haptic)', style: TextStyle(fontSize: 16 * acc.fontScale, color: isHighContrast ? Colors.white : Colors.black)),
-              value: acc.hapticEnabled,
-              onChanged: notifier.toggleHaptic,
-              activeColor: isHighContrast ? Colors.white : Colors.blue,
-            ),
-            SwitchListTile(
-              title: Text('โหมดสีคอนทราสต์สูง (High Contrast)', style: TextStyle(fontSize: 16 * acc.fontScale, color: isHighContrast ? Colors.white : Colors.black)),
-              value: acc.highContrast,
-              onChanged: notifier.toggleHighContrast,
-              activeColor: isHighContrast ? Colors.white : Colors.blue,
-            ),
-
-            // Font Scale setting
-            const Divider(height: 32.0),
-            Text(
-              'ขนาดตัวอักษร: ${acc.fontScale.toStringAsFixed(1)}x',
-              style: TextStyle(fontSize: 16 * acc.fontScale, fontWeight: FontWeight.bold, color: isHighContrast ? Colors.white : Colors.black87),
-            ),
-            Slider(
-              min: 1.0,
-              max: 2.0,
-              divisions: 5,
-              value: acc.fontScale,
-              activeColor: isHighContrast ? Colors.white : Colors.blue[800],
-              inactiveColor: Colors.grey,
-              onChanged: notifier.setFontScale,
-              semanticFormatterCallback: (double value) => 'ขนาดตัวอักษร ${value.toStringAsFixed(1)} เท่า',
+            // Font scale slider card
+            Card(
+              color: isHighContrast ? Colors.black : Colors.white,
+              shape: isHighContrast ? const RoundedRectangleBorder(side: BorderSide(color: Colors.white)) : null,
+              child: Padding(
+                padding: const EdgeInsets.all(16.0),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'ขนาดตัวอักษร: ${acc.fontScale.toStringAsFixed(1)}x',
+                      style: TextStyle(fontSize: 16 * acc.fontScale, fontWeight: FontWeight.bold, color: isHighContrast ? Colors.white : Colors.black87),
+                    ),
+                    Slider(
+                      min: 1.0,
+                      max: 2.0,
+                      divisions: 5,
+                      value: acc.fontScale,
+                      activeColor: isHighContrast ? Colors.white : Colors.blue[800],
+                      inactiveColor: Colors.grey,
+                      onChanged: notifier.setFontScale,
+                      semanticFormatterCallback: (double value) => 'ขนาดตัวอักษร ${value.toStringAsFixed(1)} เท่า',
+                    ),
+                  ],
+                ),
+              ),
             ),
             const Divider(height: 32.0),
 
@@ -336,6 +368,7 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
               label: 'ปุ่มออกจากระบบ',
               child: ElevatedButton.icon(
                 onPressed: () {
+                  notifier.logout();
                   Navigator.pushNamedAndRemoveUntil(context, '/onboarding', (route) => false);
                 },
                 icon: const Icon(Icons.logout),
