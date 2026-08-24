@@ -125,7 +125,36 @@ class AccessibilityNotifier extends StateNotifier<AccessibilityState> {
   }
 
   void setMode(String mode) {
-    state = state.copyWith(accessibilityMode: mode);
+    if (mode == 'visual') {
+      state = state.copyWith(
+        accessibilityMode: mode,
+        voiceEnabled: true,
+        highContrast: true,
+        fontScale: 1.4,
+      );
+      updateWebPreference('high_contrast', 'true');
+      updateWebPreference('theme', 'dark');
+    } else if (mode == 'wheelchair') {
+      state = state.copyWith(
+        accessibilityMode: mode,
+        voiceEnabled: false,
+        highContrast: false,
+        fontScale: 1.0,
+      );
+      updateWebPreference('high_contrast', 'false');
+      updateWebPreference('theme', 'light');
+    } else if (mode == 'speech_hearing') {
+      state = state.copyWith(
+        accessibilityMode: mode,
+        voiceEnabled: false,
+        highContrast: false,
+        fontScale: 1.2,
+      );
+      updateWebPreference('high_contrast', 'false');
+      updateWebPreference('theme', 'light');
+    } else {
+      state = state.copyWith(accessibilityMode: mode);
+    }
     _syncToBackend();
   }
 
