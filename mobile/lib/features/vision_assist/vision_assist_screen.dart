@@ -8,6 +8,7 @@ import 'package:camera/camera.dart';
 import '../../core/accessibility_notifier.dart';
 import '../../core/api_client.dart';
 import '../../core/tts_helper.dart';
+import '../../core/tflite_service.dart';
 import 'dart:convert';
 import 'camera_loader.dart';
 
@@ -60,6 +61,8 @@ class _VisionAssistScreenState extends ConsumerState<VisionAssistScreen> with Ti
   Timer? _hapticTimer;
   double _simulatedProximity = 0.0; 
   List<DetectedObstacle> _obstacles = [];
+  final TfliteService _tfliteService = TfliteService();
+  bool _isProcessingFrame = false;
   
   @override
   void initState() {
@@ -67,6 +70,7 @@ class _VisionAssistScreenState extends ConsumerState<VisionAssistScreen> with Ti
     _boxAnimController = AnimationController(vsync: this, duration: const Duration(seconds: 4))..repeat(reverse: true);
     _pulseController = AnimationController(vsync: this, duration: const Duration(milliseconds: 500))..repeat(reverse: true);
     
+    _tfliteService.loadModel();
     _initCamera();
   }
   
@@ -112,46 +116,99 @@ class _VisionAssistScreenState extends ConsumerState<VisionAssistScreen> with Ti
   }
 
   void _startSimulation() {
-    _hapticTimer = Timer.periodic(const Duration(milliseconds: 100), (timer) {
-      if (!_isScanning) {
-        timer.cancel();
-        return;
-      }
-      
-      final realProximity = captureProximity();
-      
-      List<DetectedObstacle> parsedObstacles = [];
-      try {
-        final rawJson = captureObstacles();
-        final List<dynamic> decoded = jsonDecode(rawJson);
-        parsedObstacles = decoded.map((item) => DetectedObstacle.fromJson(item)).toList();
-      } catch (e) {
-        // Ignored
-      }
+    if (kIsWeb) {
+      _hapticTimer = Timer.periodic(const Duration(milliseconds: 100), (timer) {
+        if (!_isScanning) {
+          timer.cancel();
+          return;
+        }
+        
+        final realProximity = captureProximity();
+        
+        List<DetectedObstacle> parsedObstacles = [];
+        try {
+          final rawJson = captureObstacles();
+          final List<dynamic> decoded = jsonDecode(rawJson);
+          parsedObstacles = decoded.map((item) => DetectedObstacle.fromJson(item)).toList();
+        } catch (e) {
+          // Ignored
+        }
 
-      if (mounted) {
-        setState(() {
-          _simulatedProximity = realProximity;
-          _obstacles = parsedObstacles;
-        });
-      }
-      
-      // Vibrate only if an obstacle is within range (proximity threshold > 0.15)
-      if (realProximity >= 0.15) {
-        final tickInterval = ((1.0 - realProximity) * 8 + 1).toInt();
-        if (timer.tick % tickInterval == 0) {
-          final acc = ref.read(accessibilityProvider);
-          if (acc.hapticEnabled) {
-            HapticFeedback.lightImpact();
+        if (mounted) {
+          setState(() {
+            _simulatedProximity = realProximity;
+            _obstacles = parsedObstacles;
+          });
+        }
+        
+        // Vibrate only if an obstacle is within range (proximity threshold > 0.15)
+        if (realProximity >= 0.15) {
+          final tickInterval = ((1.0 - realProximity) * 8 + 1).toInt();
+          if (timer.tick % tickInterval == 0) {
+            final acc = ref.read(accessibilityProvider);
+            if (acc.hapticEnabled) {
+              HapticFeedback.lightImpact();
+            }
           }
         }
-      }
-    });
+      });
+      return;
+    }
+
+    // On-Device Native YOLOv11-Nano TFLite image stream execution
+    if (_cameraController != null && _isCameraInitialized) {
+      _cameraController!.startImageStream((CameraImage image) async {
+        if (!_isScanning) return;
+        if (_isProcessingFrame) return;
+
+        _isProcessingFrame = true;
+        try {
+          final results = await _tfliteService.detectOnFrame(image);
+          final parsed = results.map((item) => DetectedObstacle.fromJson(item)).toList();
+          
+          double maxProximity = 0.0;
+          for (var obs in parsed) {
+            final proximity = obs.y + obs.h; // Bottom of bounding box represents proximity
+            if (proximity > maxProximity) {
+              maxProximity = proximity;
+            }
+          }
+
+          if (mounted && _isScanning) {
+            setState(() {
+              _obstacles = parsed;
+              _simulatedProximity = maxProximity;
+            });
+
+            if (maxProximity >= 0.15) {
+              final acc = ref.read(accessibilityProvider);
+              if (acc.hapticEnabled) {
+                HapticFeedback.lightImpact();
+              }
+            }
+          }
+        } catch (e) {
+          // Ignored
+        } finally {
+          _isProcessingFrame = false;
+        }
+      });
+    }
   }
   
   void _stopSimulation() {
-    _hapticTimer?.cancel();
-    _hapticTimer = null;
+    if (kIsWeb) {
+      _hapticTimer?.cancel();
+      _hapticTimer = null;
+    } else {
+      if (_cameraController != null && _isCameraInitialized) {
+        try {
+          _cameraController!.stopImageStream();
+        } catch (e) {
+          // Ignored
+        }
+      }
+    }
     setState(() {
       _simulatedProximity = 0.0;
       _obstacles = [];
