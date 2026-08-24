@@ -79,7 +79,7 @@ class _AuthScreenState extends ConsumerState<AuthScreen> {
             fontWeight: FontWeight.bold,
           ),
         ),
-        backgroundColor: isHighContrast ? Colors.black : Colors.blue,
+        backgroundColor: isHighContrast ? Colors.black : Theme.of(context).colorScheme.primary,
         foregroundColor: Colors.white,
       ),
       backgroundColor: isHighContrast ? Colors.black : Colors.grey[50],
@@ -92,114 +92,6 @@ class _AuthScreenState extends ConsumerState<AuthScreen> {
               mainAxisAlignment: MainAxisAlignment.center,
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                // Quick Accessibility Settings Panel
-                Container(
-                  padding: const EdgeInsets.all(12),
-                  decoration: BoxDecoration(
-                    color: isHighContrast ? Colors.white10 : Colors.blue[50],
-                    borderRadius: BorderRadius.circular(16),
-                    border: Border.all(
-                      color: isHighContrast ? Colors.white54 : Colors.blue[200]!,
-                      width: 1.5,
-                    ),
-                  ),
-                  child: Column(
-                    children: [
-                      Text(
-                        '⚙️ เลือกโหมดการช่วยเหลือด่วน (Quick Accessibility)',
-                        style: TextStyle(
-                          fontSize: 13 * acc.fontScale,
-                          fontWeight: FontWeight.bold,
-                          color: isHighContrast ? Colors.yellow : Colors.blue[900],
-                        ),
-                      ),
-                      const SizedBox(height: 12),
-                      // Mode Selector Buttons
-                      Row(
-                        children: [
-                          Expanded(
-                            child: _buildQuickModeButton(
-                              label: '👁 สายตา',
-                              mode: 'visual',
-                              currentMode: acc.accessibilityMode,
-                              isHighContrast: isHighContrast,
-                              onTap: () => ref.read(accessibilityProvider.notifier).setMode('visual'),
-                              acc: acc,
-                            ),
-                          ),
-                          const SizedBox(width: 6),
-                          Expanded(
-                            child: _buildQuickModeButton(
-                              label: '♿ วีลแชร์',
-                              mode: 'wheelchair',
-                              currentMode: acc.accessibilityMode,
-                              isHighContrast: isHighContrast,
-                              onTap: () => ref.read(accessibilityProvider.notifier).setMode('wheelchair'),
-                              acc: acc,
-                            ),
-                          ),
-                          const SizedBox(width: 6),
-                          Expanded(
-                            child: _buildQuickModeButton(
-                              label: '🖐 สื่อสาร',
-                              mode: 'speech_hearing',
-                              currentMode: acc.accessibilityMode,
-                              isHighContrast: isHighContrast,
-                              onTap: () => ref.read(accessibilityProvider.notifier).setMode('speech_hearing'),
-                              acc: acc,
-                            ),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 12),
-                      // Toggles for Voice & High Contrast
-                      Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                        children: [
-                          // High Contrast Toggle
-                          TextButton.icon(
-                            icon: Icon(
-                              acc.highContrast ? Icons.dark_mode : Icons.light_mode,
-                              size: 18,
-                              color: isHighContrast ? Colors.white : Colors.blue[900],
-                            ),
-                            label: Text(
-                              'คอนทราสต์สูง',
-                              style: TextStyle(
-                                fontSize: 12 * acc.fontScale,
-                                fontWeight: FontWeight.bold,
-                                color: isHighContrast ? Colors.white : Colors.blue[900],
-                              ),
-                            ),
-                            onPressed: () {
-                              ref.read(accessibilityProvider.notifier).toggleHighContrast(!acc.highContrast);
-                            },
-                          ),
-                          // Voice Guidance Toggle
-                          TextButton.icon(
-                            icon: Icon(
-                              acc.voiceEnabled ? Icons.volume_up : Icons.volume_off,
-                              size: 18,
-                              color: isHighContrast ? Colors.white : Colors.blue[900],
-                            ),
-                            label: Text(
-                              'เสียงนำทาง',
-                              style: TextStyle(
-                                fontSize: 12 * acc.fontScale,
-                                fontWeight: FontWeight.bold,
-                                color: isHighContrast ? Colors.white : Colors.blue[900],
-                              ),
-                            ),
-                            onPressed: () {
-                              ref.read(accessibilityProvider.notifier).toggleVoice(!acc.voiceEnabled);
-                            },
-                          ),
-                        ],
-                      ),
-                    ],
-                  ),
-                ),
-                const SizedBox(height: 24.0),
                 Semantics(
                   label: 'โลโก้แอปพลิเคชัน',
                   child: Text(
@@ -208,7 +100,7 @@ class _AuthScreenState extends ConsumerState<AuthScreen> {
                     style: TextStyle(
                       fontSize: 32 * acc.fontScale,
                       fontWeight: FontWeight.bold,
-                      color: isHighContrast ? Colors.white : Colors.blue[900],
+                      color: isHighContrast ? Colors.white : Theme.of(context).colorScheme.primary,
                       letterSpacing: 1.5,
                     ),
                   ),
@@ -316,7 +208,7 @@ class _AuthScreenState extends ConsumerState<AuthScreen> {
                       child: ElevatedButton(
                         onPressed: _submit,
                         style: ElevatedButton.styleFrom(
-                          backgroundColor: isHighContrast ? Colors.white : Colors.blue[800],
+                          backgroundColor: isHighContrast ? Colors.white : Theme.of(context).colorScheme.primary,
                           foregroundColor: isHighContrast ? Colors.black : Colors.white,
                           shape: RoundedRectangleBorder(
                             borderRadius: BorderRadius.circular(12),
@@ -346,7 +238,7 @@ class _AuthScreenState extends ConsumerState<AuthScreen> {
                       });
                     },
                     style: TextButton.styleFrom(
-                      foregroundColor: isHighContrast ? Colors.white : Colors.blue[800],
+                      foregroundColor: isHighContrast ? Colors.white : Theme.of(context).colorScheme.primary,
                     ),
                     child: Text(
                       _isLogin
@@ -371,10 +263,10 @@ class _AuthScreenState extends ConsumerState<AuthScreen> {
                       },
                       style: OutlinedButton.styleFrom(
                         side: BorderSide(
-                          color: isHighContrast ? Colors.white : Colors.blue,
+                          color: isHighContrast ? Colors.white : Theme.of(context).colorScheme.primary,
                           width: 1.5,
                         ),
-                        foregroundColor: isHighContrast ? Colors.white : Colors.blue,
+                        foregroundColor: isHighContrast ? Colors.white : Theme.of(context).colorScheme.primary,
                         shape: RoundedRectangleBorder(
                           borderRadius: BorderRadius.circular(12),
                         ),
@@ -391,48 +283,6 @@ class _AuthScreenState extends ConsumerState<AuthScreen> {
                 ),
               ],
             ),
-          ),
-        ),
-      ),
-    );
-  }
-
-  Widget _buildQuickModeButton({
-    required String label,
-    required String mode,
-    required String currentMode,
-    required bool isHighContrast,
-    required VoidCallback onTap,
-    required AccessibilityState acc,
-  }) {
-    final isSelected = mode == currentMode;
-    return InkWell(
-      onTap: onTap,
-      borderRadius: BorderRadius.circular(12),
-      child: Container(
-        alignment: Alignment.center,
-        padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 8),
-        decoration: BoxDecoration(
-          color: isSelected
-              ? (isHighContrast ? Colors.white : Colors.blue[800])
-              : (isHighContrast ? Colors.transparent : Colors.white),
-          borderRadius: BorderRadius.circular(12),
-          border: Border.all(
-            color: isHighContrast ? Colors.white : Colors.blue[800]!,
-            width: 1.5,
-          ),
-        ),
-        child: Text(
-          label,
-          textAlign: TextAlign.center,
-          maxLines: 1,
-          overflow: TextOverflow.ellipsis,
-          style: TextStyle(
-            fontSize: 12 * acc.fontScale,
-            fontWeight: FontWeight.bold,
-            color: isSelected
-                ? (isHighContrast ? Colors.black : Colors.white)
-                : (isHighContrast ? Colors.white : Colors.blue[800]),
           ),
         ),
       ),
