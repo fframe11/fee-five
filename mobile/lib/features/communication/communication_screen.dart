@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:js' as js;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter/semantics.dart';
@@ -8,6 +7,7 @@ import '../../core/accessibility_notifier.dart';
 import '../../core/api_client.dart';
 import '../../core/tts_helper.dart';
 import '../vision_assist/camera_loader.dart';
+import 'hand_classifier.dart';
 
 class CommunicationScreen extends ConsumerStatefulWidget {
   const CommunicationScreen({super.key});
@@ -63,17 +63,12 @@ class _CommunicationScreenState extends ConsumerState<CommunicationScreen> with 
     // Polling fallback: poll JS classifyHandShape every 300ms for live detection
     _gesturePollingTimer = Timer.periodic(const Duration(milliseconds: 300), (_) {
       if (!mounted || _tabController.index != 0) return;
-      try {
-        final landmarks = js.context['currentHandLandmarks'];
-        if (landmarks != null) {
-          final shape = js.context.callMethod('classifyHandShape', [landmarks]);
-          if (shape != null) {
-            _handleGestureDetected(shape.toString());
-          }
-        } else {
-          _handleGestureDetected('NONE');
-        }
-      } catch (_) {}
+      final shape = pollHandShape();
+      if (shape != null) {
+        _handleGestureDetected(shape);
+      } else {
+        _handleGestureDetected('NONE');
+      }
     });
 
     // Bind real-time Speech Recognition callbacks (JS -> Dart Web Speech API)
