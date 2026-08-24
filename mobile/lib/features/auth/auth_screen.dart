@@ -116,31 +116,38 @@ class _AuthScreenState extends ConsumerState<AuthScreen> {
                       const SizedBox(height: 12),
                       // Mode Selector Buttons
                       Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceEvenly,
                         children: [
-                          _buildQuickModeButton(
-                            label: '👁 สายตา',
-                            mode: 'visual',
-                            currentMode: acc.accessibilityMode,
-                            isHighContrast: isHighContrast,
-                            onTap: () => ref.read(accessibilityProvider.notifier).setMode('visual'),
-                            acc: acc,
+                          Expanded(
+                            child: _buildQuickModeButton(
+                              label: '👁 สายตา',
+                              mode: 'visual',
+                              currentMode: acc.accessibilityMode,
+                              isHighContrast: isHighContrast,
+                              onTap: () => ref.read(accessibilityProvider.notifier).setMode('visual'),
+                              acc: acc,
+                            ),
                           ),
-                          _buildQuickModeButton(
-                            label: '♿ วีลแชร์',
-                            mode: 'wheelchair',
-                            currentMode: acc.accessibilityMode,
-                            isHighContrast: isHighContrast,
-                            onTap: () => ref.read(accessibilityProvider.notifier).setMode('wheelchair'),
-                            acc: acc,
+                          const SizedBox(width: 6),
+                          Expanded(
+                            child: _buildQuickModeButton(
+                              label: '♿ วีลแชร์',
+                              mode: 'wheelchair',
+                              currentMode: acc.accessibilityMode,
+                              isHighContrast: isHighContrast,
+                              onTap: () => ref.read(accessibilityProvider.notifier).setMode('wheelchair'),
+                              acc: acc,
+                            ),
                           ),
-                          _buildQuickModeButton(
-                            label: '🖐 สื่อสาร',
-                            mode: 'speech_hearing',
-                            currentMode: acc.accessibilityMode,
-                            isHighContrast: isHighContrast,
-                            onTap: () => ref.read(accessibilityProvider.notifier).setMode('speech_hearing'),
-                            acc: acc,
+                          const SizedBox(width: 6),
+                          Expanded(
+                            child: _buildQuickModeButton(
+                              label: '🖐 สื่อสาร',
+                              mode: 'speech_hearing',
+                              currentMode: acc.accessibilityMode,
+                              isHighContrast: isHighContrast,
+                              onTap: () => ref.read(accessibilityProvider.notifier).setMode('speech_hearing'),
+                              acc: acc,
+                            ),
                           ),
                         ],
                       ),
@@ -403,7 +410,8 @@ class _AuthScreenState extends ConsumerState<AuthScreen> {
       onTap: onTap,
       borderRadius: BorderRadius.circular(12),
       child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+        alignment: Alignment.center,
+        padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 8),
         decoration: BoxDecoration(
           color: isSelected
               ? (isHighContrast ? Colors.white : Colors.blue[800])
@@ -416,8 +424,11 @@ class _AuthScreenState extends ConsumerState<AuthScreen> {
         ),
         child: Text(
           label,
+          textAlign: TextAlign.center,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
           style: TextStyle(
-            fontSize: 13 * acc.fontScale,
+            fontSize: 12 * acc.fontScale,
             fontWeight: FontWeight.bold,
             color: isSelected
                 ? (isHighContrast ? Colors.black : Colors.white)
