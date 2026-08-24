@@ -232,6 +232,71 @@ class _VisionAssistScreenState extends ConsumerState<VisionAssistScreen> with Ti
     }
   }
 
+  String _getThaiLabel(String label) {
+    switch (label.toLowerCase()) {
+      case 'person':
+        return 'คน/สิ่งกีดขวาง';
+      case 'pothole':
+        return 'หลุม';
+      case 'stairs':
+        return 'บันได';
+      case 'ramp':
+        return 'ทางลาดชัน';
+      case 'pole':
+        return 'เสาไฟฟ้า';
+      case 'door':
+        return 'ประตู';
+      case 'chair':
+        return 'เก้าอี้';
+      case 'table':
+      case 'dining table':
+        return 'โต๊ะ';
+      case 'bottle':
+        return 'ขวดน้ำ';
+      case 'cup':
+        return 'แก้วน้ำ';
+      default:
+        return label;
+    }
+  }
+
+  String _getWarningText() {
+    if (_obstacles.isEmpty) {
+      if (_simulatedProximity >= 0.5) {
+        return '⚠️ ตรวจพบ: สิ่งกีดขวางข้างหน้า!';
+      } else if (_simulatedProximity >= 0.15) {
+        return '⚠️ ตรวจพบ: อุปสรรคบนพื้นข้างหน้า!';
+      }
+      return '🟢 พื้นผิวราบรื่น / ทางสะดวก';
+    }
+
+    // Find the closest obstacle (maximum proximity / closest bottom Y)
+    DetectedObstacle? closest;
+    double maxY = 0.0;
+    for (var obs in _obstacles) {
+      final bottomY = obs.y + obs.h;
+      if (bottomY > maxY) {
+        maxY = bottomY;
+        closest = obs;
+      }
+    }
+
+    if (closest == null || _simulatedProximity < 0.15) {
+      return '🟢 พื้นผิวราบรื่น / ทางสะดวก';
+    }
+
+    final label = closest.label.toLowerCase();
+    final thaiLabel = _getThaiLabel(closest.label);
+
+    if (label == 'pothole' || label == 'stairs' || label == 'step' || label == 'crack') {
+      return '⚠️ ตรวจพบ: อุปสรรคบนพื้น ($thaiLabel) ข้างหน้า!';
+    } else if (label == 'pole' || label == 'person' || label == 'door' || label == 'wall') {
+      return '⚠️ ตรวจพบ: สิ่งกีดขวาง ($thaiLabel) ด้านหน้า!';
+    } else {
+      return '⚠️ ตรวจพบ: $thaiLabel ข้างหน้า!';
+    }
+  }
+
   @override
   void dispose() {
     _hapticTimer?.cancel();
@@ -486,11 +551,7 @@ class _VisionAssistScreenState extends ConsumerState<VisionAssistScreen> with Ti
                       child: Padding(
                         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
                         child: Text(
-                          _simulatedProximity >= 0.5
-                              ? '⚠️ ตรวจพบ: สิ่งกีดขวางระดับหัว ระยะใกล้!'
-                              : (_simulatedProximity >= 0.3
-                                  ? '⚠️ ตรวจพบ: อุปสรรคบนพื้นข้างหน้า!'
-                                  : '🟢 พื้นผิวราบรื่น / ทางสะดวก'),
+                          _getWarningText(),
                           textAlign: TextAlign.center,
                           style: TextStyle(
                             fontSize: 18 * acc.fontScale,
@@ -563,7 +624,15 @@ class BoundingBoxPainter extends CustomPainter {
   String _translateLabel(String label) {
     switch (label.toLowerCase()) {
       case 'person':
-        return 'คน';
+        return 'คน/สิ่งกีดขวาง';
+      case 'pothole':
+        return 'หลุม';
+      case 'pole':
+        return 'เสาไฟฟ้า';
+      case 'ramp':
+        return 'ทางลาดชัน';
+      case 'barrier':
+        return 'ที่กั้น/สิ่งกีดขวาง';
       case 'chair':
         return 'เก้าอี้';
       case 'table':
@@ -605,9 +674,9 @@ class BoundingBoxPainter extends CustomPainter {
 
   Color _getColorForLabel(String label) {
     final lower = label.toLowerCase();
-    if (lower == 'person' || lower == 'car' || lower == 'dog' || lower == 'giga') {
+    if (lower == 'person' || lower == 'car' || lower == 'dog' || lower == 'giga' || lower == 'pothole' || lower == 'pole') {
       return Colors.red;
-    } else if (lower == 'chair' || lower == 'table' || lower == 'bottle') {
+    } else if (lower == 'chair' || lower == 'table' || lower == 'bottle' || lower == 'ramp' || lower == 'barrier') {
       return Colors.orange;
     } else {
       return Colors.green;
