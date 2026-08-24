@@ -63,6 +63,7 @@ class _VisionAssistScreenState extends ConsumerState<VisionAssistScreen> with Ti
   List<DetectedObstacle> _obstacles = [];
   final TfliteService _tfliteService = TfliteService();
   bool _isProcessingFrame = false;
+  DateTime? _lastSpeechTime;
   
   @override
   void initState() {
@@ -115,6 +116,24 @@ class _VisionAssistScreenState extends ConsumerState<VisionAssistScreen> with Ti
     });
   }
 
+  void _speakObstaclesPeriodically() {
+    if (!_isScanning || _obstacles.isEmpty) return;
+
+    final now = DateTime.now();
+    if (_lastSpeechTime == null || now.difference(_lastSpeechTime!) > const Duration(milliseconds: 2500)) {
+      _lastSpeechTime = now;
+      final warnings = _obstacles
+          .where((obs) => (obs.y + obs.h) >= 0.15) // Only close/relevant ones
+          .map((obs) => _getThaiLabel(obs.label))
+          .toSet() // Remove duplicate labels
+          .join(' และ ');
+      if (warnings.isNotEmpty) {
+        final acc = ref.read(accessibilityProvider);
+        announceSpeech('พบ $warnings ด้านหน้า', acc.voiceEnabled);
+      }
+    }
+  }
+
   void _startSimulation() {
     if (kIsWeb) {
       _hapticTimer = Timer.periodic(const Duration(milliseconds: 100), (timer) {
@@ -134,11 +153,78 @@ class _VisionAssistScreenState extends ConsumerState<VisionAssistScreen> with Ti
           // Ignored
         }
 
+        // Enrich simulator dataset with specific requested classes if empty
+        if (parsedObstacles.isEmpty && realProximity >= 0.15) {
+          if (realProximity >= 0.50) {
+            parsedObstacles.add(DetectedObstacle(
+              label: 'pole', // เสาไฟฟ้า
+              score: 0.89,
+              x: 0.15,
+              y: 0.20,
+              w: 0.20,
+              h: 0.60,
+            ));
+            parsedObstacles.add(DetectedObstacle(
+              label: 'elevator', // ลิฟต์
+              score: 0.95,
+              x: 0.50,
+              y: 0.10,
+              w: 0.45,
+              h: 0.80,
+            ));
+          }
+          if (realProximity >= 0.30) {
+            parsedObstacles.add(DetectedObstacle(
+              label: 'pothole', // หลุม
+              score: 0.88,
+              x: 0.35,
+              y: 0.65,
+              w: 0.30,
+              h: 0.20,
+            ));
+            parsedObstacles.add(DetectedObstacle(
+              label: 'door', // ประตู
+              score: 0.91,
+              x: 0.70,
+              y: 0.20,
+              w: 0.25,
+              h: 0.70,
+            ));
+          }
+          if (realProximity >= 0.15) {
+            parsedObstacles.add(DetectedObstacle(
+              label: 'stairs', // บันได
+              score: 0.92,
+              x: 0.40,
+              y: 0.40,
+              w: 0.35,
+              h: 0.35,
+            ));
+            parsedObstacles.add(DetectedObstacle(
+              label: 'person', // คน
+              score: 0.82,
+              x: 0.05,
+              y: 0.15,
+              w: 0.25,
+              h: 0.75,
+            ));
+            parsedObstacles.add(DetectedObstacle(
+              label: 'car', // รถยนต์
+              score: 0.87,
+              x: 0.80,
+              y: 0.50,
+              w: 0.18,
+              h: 0.30,
+            ));
+          }
+        }
+
         if (mounted) {
           setState(() {
             _simulatedProximity = realProximity;
             _obstacles = parsedObstacles;
           });
+          _speakObstaclesPeriodically();
         }
         
         // Vibrate only if an obstacle is within range (proximity threshold > 0.15)
@@ -179,6 +265,7 @@ class _VisionAssistScreenState extends ConsumerState<VisionAssistScreen> with Ti
               _obstacles = parsed;
               _simulatedProximity = maxProximity;
             });
+            _speakObstaclesPeriodically();
 
             if (maxProximity >= 0.15) {
               final acc = ref.read(accessibilityProvider);
@@ -212,6 +299,7 @@ class _VisionAssistScreenState extends ConsumerState<VisionAssistScreen> with Ti
     setState(() {
       _simulatedProximity = 0.0;
       _obstacles = [];
+      _lastSpeechTime = null;
     });
   }
   
@@ -235,7 +323,18 @@ class _VisionAssistScreenState extends ConsumerState<VisionAssistScreen> with Ti
   String _getThaiLabel(String label) {
     switch (label.toLowerCase()) {
       case 'person':
-        return 'คน/สิ่งกีดขวาง';
+        return 'คน';
+      case 'car':
+        return 'รถยนต์';
+      case 'motorcycle':
+        return 'รถจักรยานยนต์';
+      case 'bicycle':
+        return 'รถจักรยาน';
+      case 'elevator':
+      case 'lift':
+        return 'ลิฟต์';
+      case 'crosswalk':
+        return 'ทางม้าลาย';
       case 'pothole':
         return 'หลุม';
       case 'stairs':
@@ -624,15 +723,28 @@ class BoundingBoxPainter extends CustomPainter {
   String _translateLabel(String label) {
     switch (label.toLowerCase()) {
       case 'person':
-        return 'คน/สิ่งกีดขวาง';
+        return 'คน';
+      case 'car':
+        return 'รถยนต์';
+      case 'motorcycle':
+        return 'รถจักรยานยนต์';
+      case 'bicycle':
+        return 'รถจักรยาน';
+      case 'elevator':
+      case 'lift':
+        return 'ลิฟต์';
+      case 'crosswalk':
+        return 'ทางม้าลาย';
       case 'pothole':
         return 'หลุม';
-      case 'pole':
-        return 'เสาไฟฟ้า';
+      case 'stairs':
+        return 'บันได';
       case 'ramp':
         return 'ทางลาดชัน';
-      case 'barrier':
-        return 'ที่กั้น/สิ่งกีดขวาง';
+      case 'pole':
+        return 'เสาไฟฟ้า';
+      case 'door':
+        return 'ประตู';
       case 'chair':
         return 'เก้าอี้';
       case 'table':
@@ -643,30 +755,6 @@ class BoundingBoxPainter extends CustomPainter {
       case 'cup':
       case 'mug':
         return 'แก้วน้ำ';
-      case 'laptop':
-        return 'โน๊ตบุ๊ค';
-      case 'cell phone':
-      case 'mobile phone':
-        return 'โทรศัพท์มือถือ';
-      case 'backpack':
-        return 'กระเป๋าเป้';
-      case 'handbag':
-        return 'กระเป๋าถือ';
-      case 'umbrella':
-        return 'ร่ม';
-      case 'car':
-        return 'รถยนต์';
-      case 'motorcycle':
-      case 'bicycle':
-        return 'รถจักรยานยนต์';
-      case 'cat':
-        return 'แมว';
-      case 'dog':
-        return 'สุนัข';
-      case 'door':
-        return 'ประตู';
-      case 'stairs':
-        return 'บันได';
       default:
         return label;
     }
@@ -674,9 +762,9 @@ class BoundingBoxPainter extends CustomPainter {
 
   Color _getColorForLabel(String label) {
     final lower = label.toLowerCase();
-    if (lower == 'person' || lower == 'car' || lower == 'dog' || lower == 'giga' || lower == 'pothole' || lower == 'pole') {
+    if (lower == 'person' || lower == 'car' || lower == 'dog' || lower == 'pothole' || lower == 'pole') {
       return Colors.red;
-    } else if (lower == 'chair' || lower == 'table' || lower == 'bottle' || lower == 'ramp' || lower == 'barrier') {
+    } else if (lower == 'chair' || lower == 'table' || lower == 'bottle' || lower == 'ramp' || lower == 'barrier' || lower == 'elevator' || lower == 'door') {
       return Colors.orange;
     } else {
       return Colors.green;
@@ -687,78 +775,25 @@ class BoundingBoxPainter extends CustomPainter {
   void paint(Canvas canvas, Size size) {
     if (proximity < 0.15) return;
 
-    if (obstacles.isEmpty) {
-      // Fallback: draw mock boxes if proximity is high, but scale them to be responsive to the real sensor!
-      final scale = 1.0 + (proximity - 0.15) * 0.7;
+    // Draw real-time YOLO/COCO/Simulated detected objects!
+    for (final ob in obstacles) {
+      final rect = Rect.fromLTWH(
+        ob.x * size.width,
+        ob.y * size.height,
+        ob.w * size.width,
+        ob.h * size.height,
+      );
+      final translatedLabel = _translateLabel(ob.label);
+      final percent = (ob.score * 100).toInt();
+      final color = _getColorForLabel(ob.label);
       
-      // Box 1 (Red - Branch)
-      if (proximity >= 0.50) {
-        _drawBox(
-          canvas,
-          size,
-          Rect.fromLTWH(
-            size.width * 0.15,
-            size.height * 0.20,
-            size.width * 0.40 * scale,
-            size.height * 0.15 * scale,
-          ),
-          'กิ่งไม้ต่ำ (${(proximity * 100).toInt()}%)',
-          Colors.red,
-        );
-      }
-      
-      // Box 2 (Orange - Pipe)
-      if (proximity >= 0.30) {
-        _drawBox(
-          canvas,
-          size,
-          Rect.fromLTWH(
-            size.width * 0.30,
-            size.height * 0.65,
-            size.width * 0.45 * scale,
-            size.height * 0.20 * scale,
-          ),
-          'ท่อชำรุด (${(proximity * 100).toInt()}%)',
-          Colors.orange,
-        );
-      }
-
-      // Box 3 (Green - Stairs)
-      if (proximity >= 0.15) {
-        _drawBox(
-          canvas,
-          size,
-          Rect.fromLTWH(
-            size.width * 0.55,
-            size.height * 0.35,
-            size.width * 0.30 * scale,
-            size.height * 0.25 * scale,
-          ),
-          'ขั้นบันได (${(proximity * 100).toInt()}%)',
-          Colors.green,
-        );
-      }
-    } else {
-      // Draw real-time YOLO/COCO detected objects!
-      for (final ob in obstacles) {
-        final rect = Rect.fromLTWH(
-          ob.x * size.width,
-          ob.y * size.height,
-          ob.w * size.width,
-          ob.h * size.height,
-        );
-        final translatedLabel = _translateLabel(ob.label);
-        final percent = (ob.score * 100).toInt();
-        final color = _getColorForLabel(ob.label);
-        
-        _drawBox(
-          canvas,
-          size,
-          rect,
-          '$translatedLabel ($percent%)',
-          color,
-        );
-      }
+      _drawBox(
+        canvas,
+        size,
+        rect,
+        '$translatedLabel ($percent%)',
+        color,
+      );
     }
   }
   
