@@ -12,6 +12,20 @@ import '../vision_assist/vision_assist_screen.dart';
 import '../communication/communication_screen.dart';
 import '../profile/profile_screen.dart';
 
+class TabItem {
+  final int id; // 0: Home, 1: Navigation, 2: Camera, 3: Communication, 4: Profile
+  final IconData icon;
+  final String label;
+  final Widget screen;
+
+  TabItem({
+    required this.id,
+    required this.icon,
+    required this.label,
+    required this.screen,
+  });
+}
+
 class HomeScreen extends ConsumerStatefulWidget {
   const HomeScreen({super.key});
 
@@ -157,21 +171,70 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     final isHighContrast = acc.highContrast;
     final themeColor = isHighContrast ? Colors.black : Colors.blue[900];
 
+    // Build active tabs list dynamically based on the current accessibility mode
+    late final List<TabItem> activeTabs;
+    activeTabs = [
+      TabItem(
+        id: 0,
+        icon: Icons.home,
+        label: 'หน้าแรก',
+        screen: _HomeTabContent(
+          onNavigateTab: (targetId) {
+            // Map original static tab ID to current dynamic active tab index
+            final targetIndex = activeTabs.indexWhere((tab) => tab.id == targetId);
+            if (targetIndex != -1) {
+              setState(() {
+                _currentIndex = targetIndex;
+              });
+            }
+          },
+        ),
+      ),
+      TabItem(
+        id: 1,
+        icon: Icons.navigation,
+        label: acc.accessibilityMode == 'visual' ? 'นำทางนำเสียง' : 'นำทาง',
+        screen: const NavigationScreen(),
+      ),
+    ];
+
+    // Blind/Low-Vision users get the Object Detection Camera
+    if (acc.accessibilityMode == 'visual') {
+      activeTabs.add(TabItem(
+        id: 2,
+        icon: Icons.camera_alt,
+        label: 'กล้อง AI',
+        screen: const VisionAssistScreen(),
+      ));
+    }
+
+    // Deaf/Hearing/Speech Impaired users get the Sign Language & Translation tools
+    if (acc.accessibilityMode == 'speech_hearing') {
+      activeTabs.add(TabItem(
+        id: 3,
+        icon: Icons.chat_bubble_outline_rounded,
+        label: 'การสื่อสาร',
+        screen: const CommunicationScreen(),
+      ));
+    }
+
+    // Everyone gets Profile and Settings
+    activeTabs.add(TabItem(
+      id: 4,
+      icon: Icons.person,
+      label: 'โปรไฟล์',
+      screen: const ProfileScreen(),
+    ));
+
+    // Safely clamp index to avoid range crash when mode switching shrinks tab count
+    if (_currentIndex >= activeTabs.length) {
+      _currentIndex = activeTabs.length - 1;
+    }
+
     return Scaffold(
       body: Stack(
         children: [
-          if (_currentIndex == 0)
-            _HomeTabContent(
-              onNavigateTab: (index) => _onTabTapped(index, acc),
-            )
-          else if (_currentIndex == 1)
-            const NavigationScreen()
-          else if (_currentIndex == 2)
-            const VisionAssistScreen()
-          else if (_currentIndex == 3)
-            const CommunicationScreen()
-          else if (_currentIndex == 4)
-            const ProfileScreen(),
+          activeTabs[_currentIndex].screen,
           
           // Live Voice Assistant Status Bar Overlay (Pulsing side-by-side card)
           if (_isLiveVoiceActive)
@@ -247,13 +310,10 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
         unselectedItemColor: Colors.grey,
         type: BottomNavigationBarType.fixed,
         onTap: (index) => _onTabTapped(index, acc),
-        items: const [
-          BottomNavigationBarItem(icon: Icon(Icons.home), label: 'หน้าแรก'),
-          BottomNavigationBarItem(icon: Icon(Icons.navigation), label: 'นำทาง'),
-          BottomNavigationBarItem(icon: Icon(Icons.camera_alt), label: 'กล้อง'),
-          BottomNavigationBarItem(icon: Icon(Icons.chat_bubble_outline_rounded), label: 'การสื่อสาร'),
-          BottomNavigationBarItem(icon: Icon(Icons.person), label: 'โปรไฟล์'),
-        ],
+        items: activeTabs.map((tab) => BottomNavigationBarItem(
+          icon: Icon(tab.icon),
+          label: tab.label,
+        )).toList(),
       ),
     );
   }
