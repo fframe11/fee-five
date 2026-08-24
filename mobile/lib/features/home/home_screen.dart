@@ -628,6 +628,181 @@ class _HomeTabContentState extends ConsumerState<_HomeTabContent> {
     );
   }
 
+  Widget _buildDirectoryItem({
+    required IconData icon,
+    required String title,
+    required String description,
+    required Color color,
+    required VoidCallback onTap,
+    required AccessibilityState acc,
+    required bool isHighContrast,
+  }) {
+    return Semantics(
+      button: true,
+      label: "$title. $description",
+      child: Card(
+        margin: const EdgeInsets.only(bottom: 16.0),
+        color: isHighContrast ? Colors.black : Colors.white,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(16.0),
+          side: BorderSide(
+            color: isHighContrast ? Colors.white : const Color(0xFF004D40),
+            width: isHighContrast ? 2.5 : 1.5,
+          ),
+        ),
+        elevation: isHighContrast ? 0 : 2,
+        child: InkWell(
+          onTap: onTap,
+          borderRadius: BorderRadius.circular(16.0),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 20.0, vertical: 18.0),
+            child: Row(
+              children: [
+                CircleAvatar(
+                  radius: 28,
+                  backgroundColor: isHighContrast ? Colors.white12 : color.withOpacity(0.1),
+                  child: Icon(
+                    icon,
+                    size: 32,
+                    color: isHighContrast ? Colors.white : color,
+                  ),
+                ),
+                const SizedBox(width: 18.0),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Text(
+                        title,
+                        style: TextStyle(
+                          fontSize: 18 * acc.fontScale,
+                          fontWeight: FontWeight.bold,
+                          color: isHighContrast ? Colors.white : Colors.black87,
+                        ),
+                      ),
+                      const SizedBox(height: 6.0),
+                      Text(
+                        description,
+                        style: TextStyle(
+                          fontSize: 13 * acc.fontScale,
+                          color: isHighContrast ? Colors.white70 : Colors.grey[600],
+                          height: 1.3,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                Icon(
+                  Icons.arrow_forward_ios_rounded,
+                  color: isHighContrast ? Colors.white54 : Colors.grey[400],
+                  size: 20,
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  void _showQuickCardsDialog(BuildContext context, AccessibilityState acc) {
+    final isHighContrast = acc.highContrast;
+    final quickMessages = [
+      'ขอยืนยันจุดขึ้นรถไฟฟ้า / ลิฟต์โดยสาร',
+      'ช่วยนำทางไปห้องน้ำผู้พิการหน่อยครับ',
+      'ต้องการติดต่อเจ้าหน้าที่สถานีด่วน',
+      'ขอทางเข้าจุดบริการรถสาธารณะ / แท็กซี่',
+    ];
+
+    showDialog(
+      context: context,
+      builder: (context) {
+        return Dialog(
+          backgroundColor: isHighContrast ? Colors.black : Colors.white,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(24),
+            side: isHighContrast ? const BorderSide(color: Colors.white, width: 3) : const BorderSide(color: Color(0xFF004D40), width: 1.5),
+          ),
+          child: Padding(
+            padding: const EdgeInsets.all(20.0),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Text(
+                      '💬 ข้อความด่วน (Quick Cards)',
+                      style: TextStyle(
+                        fontSize: 18 * acc.fontScale,
+                        fontWeight: FontWeight.bold,
+                        color: isHighContrast ? Colors.white : const Color(0xFF004D40),
+                      ),
+                    ),
+                    IconButton(
+                      icon: Icon(Icons.close, size: 28, color: isHighContrast ? Colors.white : Colors.black),
+                      onPressed: () => Navigator.pop(context),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 16),
+                GridView.builder(
+                  shrinkWrap: true,
+                  physics: const NeverScrollableScrollPhysics(),
+                  gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                    crossAxisCount: 2,
+                    crossAxisSpacing: 12,
+                    mainAxisSpacing: 12,
+                    childAspectRatio: 1.2,
+                  ),
+                  itemCount: quickMessages.length,
+                  itemBuilder: (context, index) {
+                    final msg = quickMessages[index];
+                    return Card(
+                      margin: EdgeInsets.zero,
+                      color: isHighContrast ? Colors.black : const Color(0xFFE0F2F1),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(16),
+                        side: BorderSide(
+                          color: isHighContrast ? Colors.white : const Color(0xFF004D40),
+                          width: isHighContrast ? 2 : 1,
+                        ),
+                      ),
+                      elevation: 0,
+                      child: InkWell(
+                        onTap: () {
+                          Navigator.pop(context);
+                          _showQuickMessageDialog(context, msg, acc);
+                        },
+                        borderRadius: BorderRadius.circular(16),
+                        child: Padding(
+                          padding: const EdgeInsets.all(10.0),
+                          child: Center(
+                            child: Text(
+                              msg,
+                              textAlign: TextAlign.center,
+                              style: TextStyle(
+                                fontSize: 13 * acc.fontScale,
+                                fontWeight: FontWeight.bold,
+                                color: isHighContrast ? Colors.white : const Color(0xFF004D40),
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+                    );
+                  },
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+
   Widget _buildDynamicBody(BuildContext context, AccessibilityState acc, WidgetRef ref) {
     final isHighContrast = acc.highContrast;
 
@@ -635,61 +810,29 @@ class _HomeTabContentState extends ConsumerState<_HomeTabContent> {
       return Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          Expanded(
-            child: Semantics(
-              label: 'เปิดระบบกล้องนำทางตรวจจับสิ่งกีดขวางข้างหน้า',
-              button: true,
-              child: ElevatedButton.styleFrom(
-                backgroundColor: isHighContrast ? Colors.black : Colors.blue[800],
-                side: isHighContrast ? const BorderSide(color: Colors.white, width: 2) : null,
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-              ).buildElevatedButton(
-                onPressed: () {
-                  _triggerHaptic(acc);
-                  widget.onNavigateTab(2); // Vision tab
-                },
-                child: Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    const Icon(Icons.camera_alt, size: 64, color: Colors.white),
-                    const SizedBox(height: 16.0),
-                    Text(
-                      'เริ่มตรวจจับสิ่งกีดขวาง\n(Vision Assist)',
-                      textAlign: TextAlign.center,
-                      style: TextStyle(fontSize: 22 * acc.fontScale, color: Colors.white, fontWeight: FontWeight.bold),
-                    ),
-                  ],
-                ),
-              ),
-            ),
+          _buildDirectoryItem(
+            icon: Icons.camera_alt,
+            title: 'กล้อง AI นำทาง',
+            description: 'สแกนตรวจจับและเตือนความต่างระดับหรือสิ่งกีดขวางแบบเรียลไทม์',
+            color: const Color(0xFF004D40),
+            onTap: () {
+              _triggerHaptic(acc);
+              widget.onNavigateTab(2); // Vision tab
+            },
+            acc: acc,
+            isHighContrast: isHighContrast,
           ),
-          const SizedBox(height: 16.0),
-          Expanded(
-            child: Semantics(
-              label: 'ค้นหาเส้นทางนำทางด้วยเสียง',
-              button: true,
-              child: ElevatedButton.styleFrom(
-                backgroundColor: isHighContrast ? Colors.black : Colors.green[800],
-                side: isHighContrast ? const BorderSide(color: Colors.white, width: 2) : null,
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-              ).buildElevatedButton(
-                onPressed: () {
-                  _triggerHaptic(acc);
-                  widget.onNavigateTab(1); // Navigation tab
-                },
-                child: Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    const Icon(Icons.explore, size: 64, color: Colors.white),
-                    const SizedBox(height: 16.0),
-                    Text(
-                      'ระบบนำทางด้วยเสียง',
-                      style: TextStyle(fontSize: 22 * acc.fontScale, color: Colors.white, fontWeight: FontWeight.bold),
-                    ),
-                  ],
-                ),
-              ),
-            ),
+          _buildDirectoryItem(
+            icon: Icons.explore,
+            title: 'ระบบนำทางด้วยเสียง',
+            description: 'ค้นหาเส้นทางระบุพิกัดนำทางด้วยเสียงแบบเรียลไทม์',
+            color: Colors.teal[800]!,
+            onTap: () {
+              _triggerHaptic(acc);
+              widget.onNavigateTab(1); // Navigation tab
+            },
+            acc: acc,
+            isHighContrast: isHighContrast,
           ),
         ],
       );
@@ -697,154 +840,59 @@ class _HomeTabContentState extends ConsumerState<_HomeTabContent> {
       return Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          Expanded(
-            child: Semantics(
-              label: 'แผนที่สิ่งอำนวยความสะดวกสำหรับวีลแชร์',
-              button: true,
-              child: ElevatedButton.styleFrom(
-                backgroundColor: isHighContrast ? Colors.black : Colors.blue[800],
-                side: isHighContrast ? const BorderSide(color: Colors.white, width: 2) : null,
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-              ).buildElevatedButton(
-                onPressed: () {
-                  _triggerHaptic(acc);
-                  widget.onNavigateTab(1); // Navigation tab
-                },
-                child: Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    const Icon(Icons.accessible_forward, size: 64, color: Colors.white),
-                    const SizedBox(height: 16.0),
-                    Text(
-                      'แผนที่เส้นทางสำหรับวีลแชร์',
-                      textAlign: TextAlign.center,
-                      style: TextStyle(fontSize: 22 * acc.fontScale, color: Colors.white, fontWeight: FontWeight.bold),
-                    ),
-                  ],
-                ),
-              ),
-            ),
+          _buildDirectoryItem(
+            icon: Icons.accessible_forward,
+            title: 'แผนที่เส้นทางสำหรับวีลแชร์',
+            description: 'เส้นทางพิเศษเลี่ยงสิ่งกีดขวาง ค้นหาทางลาด และลิฟต์สำหรับวีลแชร์',
+            color: const Color(0xFF004D40),
+            onTap: () {
+              _triggerHaptic(acc);
+              widget.onNavigateTab(1); // Navigation tab
+            },
+            acc: acc,
+            isHighContrast: isHighContrast,
           ),
-          const SizedBox(height: 16.0),
-          Expanded(
-            child: Semantics(
-              label: 'ขอความช่วยเหลือผู้ดูแล',
-              button: true,
-              child: ElevatedButton.styleFrom(
-                backgroundColor: isHighContrast ? Colors.black : Colors.teal[800],
-                side: isHighContrast ? const BorderSide(color: Colors.white, width: 2) : null,
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-              ).buildElevatedButton(
-                onPressed: () {
-                  _triggerHaptic(acc);
-                  widget.onNavigateTab(4); // Profile / Contact tab
-                },
-                child: Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    const Icon(Icons.support_agent, size: 64, color: Colors.white),
-                    const SizedBox(height: 16.0),
-                    Text(
-                      'ติดต่อผู้ดูแล / ผู้ช่วยเหลือ',
-                      style: TextStyle(fontSize: 22 * acc.fontScale, color: Colors.white, fontWeight: FontWeight.bold),
-                    ),
-                  ],
-                ),
-              ),
-            ),
+          _buildDirectoryItem(
+            icon: Icons.support_agent,
+            title: 'ติดต่อผู้ดูแล / ผู้ช่วยเหลือ',
+            description: 'ติดต่อเจ้าหน้าที่ดูแลความสะดวกประจำรถไฟฟ้าหรือญาติสนิททันที',
+            color: Colors.teal[800]!,
+            onTap: () {
+              _triggerHaptic(acc);
+              widget.onNavigateTab(4); // Profile / Contact tab
+            },
+            acc: acc,
+            isHighContrast: isHighContrast,
           ),
         ],
       );
     } else {
-      final quickMessages = [
-        'ขอยืนยันจุดขึ้นรถไฟฟ้า / ลิฟต์โดยสาร',
-        'ช่วยนำทางไปห้องน้ำผู้พิการหน่อยครับ',
-        'ต้องการติดต่อเจ้าหน้าที่สถานีด่วน',
-        'ขอทางเข้าจุดบริการรถสาธารณะ / แท็กซี่',
-      ];
-
       return Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          Padding(
-            padding: const EdgeInsets.only(bottom: 12.0),
-            child: Text(
-              '💬 แตะแสดงข้อความด่วน (Quick Cards)',
-              style: TextStyle(
-                fontSize: 16 * acc.fontScale,
-                fontWeight: FontWeight.bold,
-                color: isHighContrast ? Colors.white : Colors.purple[900],
-              ),
-            ),
+          _buildDirectoryItem(
+            icon: Icons.chat_bubble_outline_rounded,
+            title: 'ข้อความช่วยเหลือด่วน (Quick Cards)',
+            description: 'ขยายข้อความด่วนขนาดใหญ่เต็มหน้าจอมือถือเพื่อยื่นโชว์สื่อสารกับผู้อื่น',
+            color: const Color(0xFF004D40),
+            onTap: () {
+              _triggerHaptic(acc);
+              _showQuickCardsDialog(context, acc);
+            },
+            acc: acc,
+            isHighContrast: isHighContrast,
           ),
-          Expanded(
-            child: GridView.builder(
-              physics: const NeverScrollableScrollPhysics(),
-              gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-                crossAxisCount: 2,
-                crossAxisSpacing: 12,
-                mainAxisSpacing: 12,
-                childAspectRatio: 1.35,
-              ),
-              itemCount: quickMessages.length,
-              itemBuilder: (context, index) {
-                final msg = quickMessages[index];
-                return Card(
-                  margin: EdgeInsets.zero,
-                  color: isHighContrast ? Colors.black : Colors.purple[50],
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(16),
-                    side: isHighContrast ? const BorderSide(color: Colors.white, width: 2) : BorderSide.none,
-                  ),
-                  elevation: isHighContrast ? 0 : 2,
-                  child: InkWell(
-                    onTap: () {
-                      _triggerHaptic(acc);
-                      _showQuickMessageDialog(context, msg, acc);
-                    },
-                    borderRadius: BorderRadius.circular(16),
-                    child: Padding(
-                      padding: const EdgeInsets.all(12.0),
-                      child: Center(
-                        child: Text(
-                          msg,
-                          textAlign: TextAlign.center,
-                          style: TextStyle(
-                            fontSize: 14 * acc.fontScale,
-                            fontWeight: FontWeight.bold,
-                            color: isHighContrast ? Colors.white : Colors.purple[900],
-                          ),
-                        ),
-                      ),
-                    ),
-                  ),
-                );
-              },
-            ),
-          ),
-          const SizedBox(height: 16.0),
-          Semantics(
-            button: true,
-            label: 'เปิดกล้องตรวจจับ SOS ด้วยมือ',
-            child: SizedBox(
-              height: 54,
-              child: ElevatedButton(
-                onPressed: () {
-                  _triggerHaptic(acc);
-                  widget.onNavigateTab(3); // SOS tab
-                },
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: isHighContrast ? Colors.black : Colors.purple[800],
-                  foregroundColor: Colors.white,
-                  side: isHighContrast ? const BorderSide(color: Colors.white, width: 2) : null,
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                ),
-                child: Text(
-                  'เปิดกล้อง SOS',
-                  style: TextStyle(fontSize: 18 * acc.fontScale, fontWeight: FontWeight.bold),
-                ),
-              ),
-            ),
+          _buildDirectoryItem(
+            icon: Icons.camera_front_rounded,
+            title: 'เปิดกล้องตรวจจับสัญญาณ SOS',
+            description: 'โบกมือผ่านกล้องหน้านับถอยหลังส่งพิกัดฉุกเฉินส่งให้คนสนิท',
+            color: Colors.teal[800]!,
+            onTap: () {
+              _triggerHaptic(acc);
+              widget.onNavigateTab(3); // SOS tab
+            },
+            acc: acc,
+            isHighContrast: isHighContrast,
           ),
         ],
       );
@@ -852,8 +900,3 @@ class _HomeTabContentState extends ConsumerState<_HomeTabContent> {
   }
 }
 
-extension on ButtonStyle {
-  Widget buildElevatedButton({required VoidCallback onPressed, required Widget child}) {
-    return ElevatedButton(style: this, onPressed: onPressed, child: child);
-  }
-}
