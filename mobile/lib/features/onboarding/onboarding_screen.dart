@@ -19,21 +19,21 @@ class _OnboardingScreenState extends ConsumerState<OnboardingScreen> {
   final List<OnboardingSlideData> _slides = [
     OnboardingSlideData(
       icon: Icons.remove_red_eye_rounded,
-      title: "กล้องตรวจสิ่งกีดขวาง AI",
-      description: "วิเคราะห์ภาพและส่งเสียงเตือนสิ่งกีดขวางบนพื้นแบบเรียลไทม์",
-      color: const Color(0xFF0D47A1), // Colors.blue[900]
+      title: "กล้อง AI ตรวจสิ่งกีดขวาง",
+      description: "วิเคราะห์ภาพ ตรวจจับเสา ทางต่างระดับ และส่งเสียงพร้อมการสั่นเตือนแบบเรียลไทม์",
+      color: const Color(0xFF8338EC), // Volcanic Ash Purple
     ),
     OnboardingSlideData(
-      icon: Icons.accessible_rounded,
-      title: "แผนที่นำทางวีลแชร์",
-      description: "ค้นหาลิฟต์ ทางลาด และเลี่ยงอุปสรรคเพื่ออำนวยความสะดวก",
-      color: const Color(0xFF00695C), // Colors.teal[800]
+      icon: Icons.navigation_rounded,
+      title: "ระบบนำทางด้วยเสียง",
+      description: "ค้นหาเส้นทาง นำทางแบบ Turn-by-Turn เลี่ยงสิ่งกีดขวางตามแนวทางเดินคนตาบอด",
+      color: const Color(0xFFFB5607), // Volcanic Ash Orange
     ),
     OnboardingSlideData(
-      icon: Icons.gesture_rounded,
-      title: "แจ้งเหตุฉุกเฉิน SOS ด่วน",
-      description: "ส่งตำแหน่ง SOS ให้คนสนิททันทีด้วยการโบกมือผ่านกล้องหน้า",
-      color: const Color(0xFF6A1B9A), // Colors.purple[800]
+      icon: Icons.mic_rounded,
+      title: "คำสั่งเสียง & ขอความช่วยเหลือ",
+      description: "สั่งการด้วยเสียงภาษาไทยสด และส่งสัญญาณขอความช่วยเหลือฉุกเฉินพร้อมระบุพิกัดทันที",
+      color: const Color(0xFF212529), // Volcanic Ash Dark Grey/Black
     ),
   ];
 
@@ -61,8 +61,8 @@ class _OnboardingScreenState extends ConsumerState<OnboardingScreen> {
     }
     if (!mounted) return;
     final acc = ref.read(accessibilityProvider);
-    announceSpeech("ยินดีด้วย! บันทึกข้อมูลเริ่มต้นสำเร็จแล้ว กรุณาเลือกรูปแบบความต้องการพิเศษต่อ", acc.voiceEnabled);
-    Navigator.pushReplacementNamed(context, '/profile_selection');
+    announceSpeech("ยินดีด้วย! บันทึกข้อมูลเริ่มต้นสำเร็จแล้ว กรุณาเข้าสู่ระบบหรือลงทะเบียนเพื่อใช้งานต่อ", acc.voiceEnabled);
+    Navigator.pushReplacementNamed(context, '/auth');
   }
 
   @override
@@ -70,7 +70,6 @@ class _OnboardingScreenState extends ConsumerState<OnboardingScreen> {
     final acc = ref.watch(accessibilityProvider);
     final isHighContrast = acc.highContrast;
     final themeColor = isHighContrast ? Colors.black : _slides[_currentPage].color;
-    final textColor = isHighContrast ? Colors.white : Colors.black87;
     final bgTextColor = isHighContrast ? Colors.white : Colors.white;
 
     return Scaffold(

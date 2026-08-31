@@ -6,6 +6,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter/semantics.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:camera/camera.dart';
+import 'package:geolocator/geolocator.dart';
 import '../../core/accessibility_notifier.dart';
 import '../../core/api_client.dart';
 import '../../core/tts_helper.dart';
@@ -117,19 +118,43 @@ class _GestureSosScreenState extends ConsumerState<GestureSosScreen> with Ticker
   }
 
   Future<void> _completeEmergency() async {
+    double realLat = 0.0;
+    double realLng = 0.0;
+
+    try {
+      final pos = await Geolocator.getCurrentPosition(
+        desiredAccuracy: LocationAccuracy.high,
+        timeLimit: const Duration(seconds: 5),
+      );
+      realLat = pos.latitude;
+      realLng = pos.longitude;
+    } catch (_) {
+      try {
+        final lastPos = await Geolocator.getLastKnownPosition();
+        if (lastPos != null) {
+          realLat = lastPos.latitude;
+          realLng = lastPos.longitude;
+        }
+      } catch (_) {}
+    }
+
     try {
       await ApiClient().reportEmergencySOS(
-        lat: 13.7563,
-        lng: 100.5018,
+        lat: realLat,
+        lng: realLng,
         sosType: 'gesture',
         confidence: 0.95,
       );
     } catch (e) {
-      // Ignored for demo
+      debugPrint('[SOS] API report error: $e');
     }
     
     if (!mounted) return;
     
+    final coordText = (realLat != 0.0 && realLng != 0.0)
+        ? '${realLat.toStringAsFixed(5)}, ${realLng.toStringAsFixed(5)}'
+        : 'GPS กำลังค้นหาตำแหน่ง';
+
     showDialog(
       context: context,
       barrierDismissible: false,
@@ -138,10 +163,10 @@ class _GestureSosScreenState extends ConsumerState<GestureSosScreen> with Ticker
         content: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
-          children: const [
-            Text('ส่งพิกัดไปยังศูนย์ช่วยเหลือและผู้ติดต่อฉุกเฉินแล้ว'),
-            SizedBox(height: 8),
-            Text('พิกัด: 13.7563, 100.5018', style: TextStyle(fontWeight: FontWeight.bold)),
+          children: [
+            const Text('ส่งพิกัดจริงไปยังศูนย์ช่วยเหลือและผู้ติดต่อฉุกเฉินแล้ว'),
+            const SizedBox(height: 8),
+            Text('พิกัดจริง: $coordText', style: const TextStyle(fontWeight: FontWeight.bold)),
           ],
         ),
         actions: [

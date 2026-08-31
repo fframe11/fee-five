@@ -2,344 +2,646 @@
 <html>
 <head>
     <meta charset="utf-8" />
-    <title>OpenFreeMap Simulator</title>
-    <meta name="viewport" content="initial-scale=1,maximum-scale=1,user-scalable=no" />
-    <script src="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.js"></script>
-    <link href="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.css" rel="stylesheet" />
+    <title>TAM - Interactive Accessibility & Transit Map</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+    
+    <!-- Leaflet High-Performance Map Engine -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    
     <style>
-        body { margin: 0; padding: 0; }
-        #map { position: absolute; top: 0; bottom: 0; width: 100%; }
-        
-        /* High Contrast Map Filter */
-        .high-contrast-map {
-            filter: contrast(1.5) saturate(1.3);
+        html, body, #map {
+            margin: 0;
+            padding: 0;
+            width: 100%;
+            height: 100%;
+            background: #e0e4e8;
+            touch-action: pan-x pan-y;
+            user-select: none;
+            -webkit-user-select: none;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
         }
 
-        /* Marker Container (Maplibre handles positioning transform) */
-        .marker-icon {
-            width: 44px;
-            height: 44px;
+        /* Custom Marker Styles */
+        .pin-bubble {
             display: flex;
             align-items: center;
             justify-content: center;
-            outline: none;
-            cursor: pointer;
-            background: transparent;
-        }
-
-        /* Visual Marker Inner Element (Safe to animate scale/transforms) */
-        .marker-inner {
-            width: 38px;
-            height: 38px;
+            width: 34px;
+            height: 34px;
             border-radius: 50%;
+            color: #ffffff;
+            font-size: 16px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.35);
+            border: 2.5px solid #ffffff;
+            cursor: pointer;
+            transition: transform 0.15s ease;
+        }
+        .pin-bubble:hover {
+            transform: scale(1.25);
+            z-index: 1000 !important;
+        }
+        .pin-ramp { background-color: #00897B; }
+        .pin-elevator { background-color: #1E88E5; }
+        .pin-broken { background-color: #D32F2F; border-color: #FFCDD2; }
+        .pin-tactile { background-color: #F57C00; }
+        .pin-hazard { background-color: #C2185B; }
+        .pin-bus { background-color: #0284c7; border-color: #e0f2fe; }
+        .pin-train { background-color: #4338ca; border-color: #e0e7ff; }
+        .pin-temple { background-color: #d97706; border-color: #fef3c7; }
+        .pin-hospital { background-color: #dc2626; border-color: #fee2e2; }
+        .pin-fuel { background-color: #ea580c; border-color: #ffedd5; }
+        .pin-store { background-color: #16a34a; border-color: #dcfce7; }
+        
+        .pin-user-dot {
+            width: 20px;
+            height: 20px;
+            border-radius: 50%;
+            background-color: #0D47A1;
+            border: 3.5px solid #ffffff;
+            box-shadow: 0 0 0 6px rgba(13, 71, 161, 0.4);
+            animation: pulse-ring 2s infinite;
+        }
+
+        @keyframes pulse-ring {
+            0% { box-shadow: 0 0 0 0 rgba(13, 71, 161, 0.6); }
+            70% { box-shadow: 0 0 0 14px rgba(13, 71, 161, 0); }
+            100% { box-shadow: 0 0 0 0 rgba(13, 71, 161, 0); }
+        }
+
+        /* Live Moving Train Marker (BangkokTransit Simulation) */
+        .train-live-marker {
+            background: #4338ca;
+            color: white;
+            border: 2px solid white;
+            border-radius: 50%;
+            width: 28px;
+            height: 28px;
             display: flex;
             align-items: center;
             justify-content: center;
-            box-shadow: 0 4px 8px rgba(0,0,0,0.35);
-            border: 3.5px solid white;
-            transition: transform 0.15s ease-out, border-color 0.15s ease-out, box-shadow 0.15s ease-out;
-        }
-        
-        /* Bright yellow focus indicator for accessibility */
-        .marker-icon:focus .marker-inner {
-            border-color: #ffd600 !important;
-            box-shadow: 0 0 0 5px rgba(255, 214, 0, 0.6);
-            transform: scale(1.2);
+            font-size: 14px;
+            box-shadow: 0 0 10px rgba(67, 56, 202, 0.7);
+            cursor: pointer;
         }
 
-        .marker-icon:hover .marker-inner {
-            transform: scale(1.15);
+        /* Leaflet popup customization */
+        .leaflet-popup-content-wrapper {
+            border-radius: 12px;
+            box-shadow: 0 4px 16px rgba(0,0,0,0.25);
+        }
+        .leaflet-popup-content {
+            margin: 12px 14px;
+            line-height: 1.4;
+        }
+        
+        /* Map Controls Position */
+        .leaflet-top.leaflet-right {
+            top: 240px !important;
+            right: 12px !important;
+        }
+        .leaflet-control-zoom a {
+            width: 36px !important;
+            height: 36px !important;
+            line-height: 36px !important;
+            font-size: 20px !important;
+            border-radius: 8px !important;
+            color: #333 !important;
         }
 
-        /* High contrast specific background colors */
-        .marker-lift {
-            background-color: #0d47a1; /* Dark blue */
+        /* Floating My Location Button */
+        .my-location-btn {
+            position: absolute;
+            bottom: 24px;
+            right: 16px;
+            z-index: 1000;
+            background: #ffffff;
+            color: #0D47A1;
+            border: 2px solid #0D47A1;
+            border-radius: 50%;
+            width: 48px;
+            height: 48px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 22px;
+            box-shadow: 0 4px 14px rgba(0,0,0,0.3);
+            cursor: pointer;
+            transition: all 0.2s ease;
         }
-        
-        .marker-lift-broken {
-            background-color: #b71c1c; /* Crimson red */
-            border-color: #ffcdd2;
+        .my-location-btn:hover {
+            background: #0D47A1;
+            color: #ffffff;
+            transform: scale(1.08);
         }
-        
-        .marker-ramp {
-            background-color: #1b5e20; /* Forest green */
+
+        /* Category Filter Chips Bar */
+        .poi-filter-bar {
+            position: absolute;
+            top: 12px;
+            left: 12px;
+            right: 12px;
+            z-index: 1000;
+            display: flex;
+            gap: 8px;
+            overflow-x: auto;
+            padding-bottom: 4px;
+            scrollbar-width: none;
         }
-        
-        .marker-tactile {
-            background-color: #e65100; /* Dark orange */
+        .poi-filter-bar::-webkit-scrollbar {
+            display: none;
+        }
+        .poi-chip {
+            background: rgba(255, 255, 255, 0.95);
+            padding: 6px 12px;
+            border-radius: 20px;
+            font-size: 13px;
+            font-weight: bold;
+            color: #334155;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+            display: flex;
+            align-items: center;
+            gap: 5px;
+            cursor: pointer;
+            white-space: nowrap;
+            border: 1.5px solid transparent;
+            transition: all 0.2s ease;
+            backdrop-filter: blur(4px);
+        }
+        .poi-chip:hover, .poi-chip.active {
+            background: #0D47A1;
+            color: #ffffff;
+            border-color: #0D47A1;
         }
     </style>
 </head>
 <body>
 <div id="map"></div>
+
+<!-- Real Place Category Filter Bar -->
+<div class="poi-filter-bar">
+    <div class="poi-chip active" id="chipTrain" onclick="toggleCategory('train')">🚆 BTS / MRT (ตำแหน่งรถสด)</div>
+    <div class="poi-chip active" id="chipHospital" onclick="toggleCategory('hospital')">🏥 โรงพยาบาล</div>
+    <div class="poi-chip active" id="chipTemple" onclick="toggleCategory('temple')">🛕 วัด / ศาสนสถาน</div>
+    <div class="poi-chip" id="chipFuel" onclick="toggleCategory('fuel')">⛽ ปั๊มน้ำมัน/EV</div>
+    <div class="poi-chip" id="chipBus" onclick="toggleCategory('bus')">🚏 ป้ายรถเมล์</div>
+    <div class="poi-chip" id="chipStore" onclick="toggleCategory('store')">🏪 7-Eleven / มาร์ท</div>
+    <div class="poi-chip" id="chipAccess" onclick="toggleCategory('access')">♿ ทางลาด/ลิฟต์</div>
+</div>
+
+<div class="my-location-btn" id="btnMyLocation" title="ไปยังตำแหน่งปัจจุบันของฉัน">📍</div>
+
 <script>
-    // Default coordinates pointing to Bangkok (Siam area)
-    const bangkok = [100.5348, 13.7461]; 
-    
-    // Parse URL params
-    const urlParams = new URLSearchParams(window.location.search);
-    const isDark = urlParams.get('theme') === 'dark';
-    const isHighContrast = urlParams.get('hc') === 'true';
-    
-    // OpenFreeMap Styles
-    const styleUrl = isDark 
-        ? 'https://tiles.openfreemap.org/styles/dark' 
-        : 'https://tiles.openfreemap.org/styles/bright';
+    // Default Fallback Coordinates (Bangkok Siam Core)
+    const DEFAULT_LAT = 13.7461;
+    const DEFAULT_LNG = 100.5348;
 
-    const map = new maplibregl.Map({
-        container: 'map',
-        style: styleUrl,
-        center: bangkok,
-        zoom: 15
-    });
+    let currentUserLat = DEFAULT_LAT;
+    let currentUserLng = DEFAULT_LNG;
+    let userMarker = null;
 
-    if (isHighContrast) {
-        document.getElementById('map').classList.add('high-contrast-map');
-    }
-
-    // Add navigation controls
-    map.addControl(new maplibregl.NavigationControl());
-
-    // User Position Marker (pulsing blue dot)
-    const el = document.createElement('div');
-    el.style.width = '16px';
-    el.style.height = '16px';
-    el.style.borderRadius = '50%';
-    el.style.backgroundColor = '#1565C0';
-    el.style.border = '3px solid white';
-    el.style.boxShadow = '0 0 0 6px rgba(21, 101, 192, 0.4)';
-    el.setAttribute('aria-label', 'ตำแหน่งปัจจุบันของคุณ');
-    
-    new maplibregl.Marker(el)
-        .setLngLat(bangkok)
-        .addTo(map);
-
-    // Mock Accessibility Barriers / Assets
-    const assets = [
-      { type: '♿', name: 'ลิฟต์สถานีบีทีเอสสยาม', coords: [100.5348, 13.7461], desc: 'เปิดใช้งานปกติ ทางออก 3' },
-      { type: '♿', name: 'ลิฟต์ขัดข้อง (ฝั่งเหนือ)', coords: [100.5358, 13.7465], desc: 'ปิดปรับปรุงชั่วคราว มีทางลาดสะพานลอยสำรอง' },
-      { type: '🔺', name: 'ทางลาดพารากอน', coords: [100.5342, 13.7469], desc: 'ทางลาดมาตรฐานความชันต่ำ 5% ปลอดภัย' },
-      { type: '🦯', name: 'เส้นทางคนตาบอด', coords: [100.5335, 13.7455], desc: 'เส้นนำทาง Tactile Path เชื่อมสถานีอำนวยความสะดวก' }
-    ];
-
-    assets.forEach(asset => {
-        const markerDiv = document.createElement('div');
-        markerDiv.className = 'marker-icon';
-        
-        // Accessibility attributes for screen readers
-        markerDiv.setAttribute('tabindex', '0');
-        markerDiv.setAttribute('role', 'button');
-        
-        const innerDiv = document.createElement('div');
-        innerDiv.className = 'marker-inner';
-        
-        let labelText = '';
-        let iconHtml = '';
-        
-        if (asset.type === '♿') {
-            if (asset.name.includes('ขัดข้อง')) {
-                innerDiv.classList.add('marker-lift-broken');
-                iconHtml = '🚫♿'; // blocked wheelchair
-                labelText = `คำเตือนการเข้าถึง: ${asset.name}. รายละเอียด: ${asset.desc}`;
-            } else {
-                innerDiv.classList.add('marker-lift');
-                iconHtml = '♿';
-                labelText = `สิ่งอำนวยความสะดวก: ${asset.name}. รายละเอียด: ${asset.desc}`;
-            }
-        } else if (asset.type === '🔺') {
-            innerDiv.classList.add('marker-ramp');
-            iconHtml = '📐';
-            labelText = `สิ่งอำนวยความสะดวก: ${asset.name}. รายละเอียด: ${asset.desc}`;
-        } else if (asset.type === '🦯') {
-            innerDiv.classList.add('marker-tactile');
-            iconHtml = '🦯';
-            labelText = `เส้นทางเดินคนตาบอด: ${asset.name}. รายละเอียด: ${asset.desc}`;
-        }
-        
-        innerDiv.innerHTML = `<span style="font-size: 18px;">${iconHtml}</span>`;
-        markerDiv.appendChild(innerDiv);
-        
-        markerDiv.setAttribute('aria-label', labelText);
-        markerDiv.setAttribute('title', labelText); // browser tooltip
-        
-        // Keyboard enter / space activation support for screen readers
-        markerDiv.addEventListener('keydown', (e) => {
-            if (e.key === 'Enter' || e.key === ' ') {
-                e.preventDefault();
-                markerDiv.click();
-            }
-        });
-
-        const popup = new maplibregl.Popup({ offset: 25 })
-            .setHTML(`<strong style="font-size:14px;color:#111;">${asset.name}</strong><p style="margin:4px 0 0 0;color:#555;font-size:12px;">${asset.desc}</p>`);
-
-        new maplibregl.Marker(markerDiv)
-            .setLngLat(asset.coords)
-            .setPopup(popup)
-            .addTo(map);
-    });
-
-    // A* Pathfinding Nodes and Edges in Siam Area
-    const NODES = {
-      'paragon_north': { id: 'paragon_north', name: 'สยามพารากอน (ประตูเหนือ)', coords: [100.5342, 13.7469] },
-      'paragon_plaza': { id: 'paragon_plaza', name: 'สยามพารากอน (ลานน้ำพุ)', coords: [100.5348, 13.7461] },
-      'paragon_east': { id: 'paragon_east', name: 'สยามพารากอน (ฝั่งตะวันออก)', coords: [100.5358, 13.7465] },
-      'siam_center_west': { id: 'siam_center_west', name: 'สยามเซ็นเตอร์ (ฝั่งตะวันตก)', coords: [100.5335, 13.7455] },
-      'bts_siam_center': { id: 'bts_siam_center', name: 'สถานีรถไฟฟ้า BTS สยาม', coords: [100.5348, 13.7455] },
-      'wat_pathum': { id: 'wat_pathum', name: 'วัดปทุมวนาราม', coords: [100.5365, 13.7450] },
-      'bts_siam_exit3': { id: 'bts_siam_exit3', name: 'BTS สยาม (ลิฟต์ทางออก 3)', coords: [100.5365, 13.7461] },
-      'centralworld': { id: 'centralworld', name: 'เซ็นทรัลเวิลด์', coords: [100.5380, 13.7450] },
-      'siam_discovery': { id: 'siam_discovery', name: 'สยามดิสคัฟเวอรี', coords: [100.5335, 13.7465] },
-      'siam_square_soi7': { id: 'siam_square_soi7', name: 'สยามสแควร์ ซอย 7', coords: [100.5348, 13.7448] }
+    let activeCategories = {
+        train: true,
+        hospital: true,
+        temple: true,
+        fuel: false,
+        bus: false,
+        store: false,
+        access: true
     };
 
-    const EDGES = [
-      { u: 'paragon_north', v: 'paragon_plaza', distance: 100, isRamp: true, isStairs: false, hasBrokenElevator: false },
-      { u: 'paragon_plaza', v: 'paragon_east', distance: 120, isRamp: true, isStairs: false, hasBrokenElevator: false },
-      { u: 'paragon_plaza', v: 'bts_siam_center', distance: 80, isRamp: true, isStairs: false, hasBrokenElevator: false },
-      { u: 'paragon_east', v: 'bts_siam_exit3', distance: 90, isRamp: true, isStairs: false, hasBrokenElevator: false },
-      { u: 'bts_siam_center', v: 'bts_siam_exit3', distance: 150, isRamp: false, isStairs: false, hasBrokenElevator: true },
-      { u: 'bts_siam_center', v: 'siam_center_west', distance: 130, isRamp: true, isStairs: false, hasBrokenElevator: false },
-      { u: 'siam_center_west', v: 'siam_discovery', distance: 120, isRamp: true, isStairs: false, hasBrokenElevator: false },
-      { u: 'siam_center_west', v: 'siam_square_soi7', distance: 100, isRamp: false, isStairs: true, hasBrokenElevator: false },
-      { u: 'bts_siam_exit3', v: 'wat_pathum', distance: 130, isRamp: true, isStairs: false, hasBrokenElevator: false },
-      { u: 'bts_siam_exit3', v: 'centralworld', distance: 180, isRamp: true, isStairs: false, hasBrokenElevator: false }
+    // Initialize Leaflet Map
+    const map = L.map('map', {
+        center: [DEFAULT_LAT, DEFAULT_LNG],
+        zoom: 16,
+        zoomControl: true,
+        attributionControl: false,
+        dragging: true,
+        touchZoom: true,
+        scrollWheelZoom: true,
+        doubleClickZoom: true,
+        boxZoom: true
+    });
+
+    // Primary High-Resolution OpenStreetMap Tiles
+    L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        maxZoom: 19,
+        crossOrigin: true
+    }).addTo(map);
+
+    // Layer Groups
+    const busStopsLayer = L.layerGroup().addTo(map);
+    const realPlacesLayer = L.layerGroup().addTo(map);
+    const liveTrainsLayer = L.layerGroup().addTo(map);
+    const accessibilityLayer = L.layerGroup().addTo(map);
+    let currentRouteLine = null;
+
+    // User Location Pulse Marker Icon
+    const userIcon = L.divIcon({
+        className: 'user-marker',
+        html: '<div class="pin-user-dot"></div>',
+        iconSize: [24, 24],
+        iconAnchor: [12, 12]
+    });
+
+    function updateUserMarker(lat, lng, labelText = '📍 ตำแหน่งปัจจุบันของคุณ') {
+        currentUserLat = lat;
+        currentUserLng = lng;
+
+        if (userMarker) {
+            userMarker.setLatLng([lat, lng]);
+            userMarker.setPopupContent(`<strong>${labelText}</strong><br>พิกัด: ${lat.toFixed(5)}, ${lng.toFixed(5)}`);
+        } else {
+            userMarker = L.marker([lat, lng], { icon: userIcon })
+                .bindPopup(`<strong>${labelText}</strong><br>พิกัด: ${lat.toFixed(5)}, ${lng.toFixed(5)}`)
+                .addTo(map);
+        }
+    }
+
+    function calcDistance(lat1, lon1, lat2, lon2) {
+        const R = 6371000;
+        const dLat = (lat2 - lat1) * Math.PI / 180;
+        const dLon = (lon2 - lon1) * Math.PI / 180;
+        const a = Math.sin(dLat/2) * Math.sin(dLat/2) +
+                  Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
+                  Math.sin(dLon/2) * Math.sin(dLon/2);
+        const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+        return Math.round(R * c);
+    }
+
+    // 1. Live BTS Train Positions Simulation (BangkokTransit Model)
+    // Key Sukhumvit / Silom Station Waypoints
+    const BTS_SUKHUMVIT_TRACK = [
+        { name: 'หมอชิต', lat: 13.8024, lng: 100.5537 },
+        { name: 'สะพานควาย', lat: 13.7937, lng: 100.5497 },
+        { name: 'อารีย์', lat: 13.7797, lng: 100.5447 },
+        { name: 'สนามเป้า', lat: 13.7725, lng: 100.5415 },
+        { name: 'อนุสาวรีย์ชัยฯ', lat: 13.7649, lng: 100.5383 },
+        { name: 'พญาไท', lat: 13.7569, lng: 100.5348 },
+        { name: 'ราชเทวี', lat: 13.7518, lng: 100.5316 },
+        { name: 'สยาม', lat: 13.7455, lng: 100.5348 },
+        { name: 'ชิดลม', lat: 13.7441, lng: 100.5430 },
+        { name: 'เพลินจิต', lat: 13.7431, lng: 100.5491 },
+        { name: 'นานา', lat: 13.7402, lng: 100.5552 },
+        { name: 'อโศก', lat: 13.7368, lng: 100.5604 },
+        { name: 'พร้อมพงษ์', lat: 13.7303, lng: 100.5698 },
+        { name: 'ทองหล่อ', lat: 13.7243, lng: 100.5785 },
+        { name: 'เอกมัย', lat: 13.7192, lng: 100.5852 }
     ];
 
-    function getHeuristic(nodeA, nodeB) {
-      var lat1 = nodeA.coords[1];
-      var lon1 = nodeA.coords[0];
-      var lat2 = nodeB.coords[1];
-      var lon2 = nodeB.coords[0];
-      var dLat = (lat2 - lat1) * Math.PI / 180;
-      var dLon = (lon2 - lon1) * Math.PI / 180;
-      var a = Math.sin(dLat/2) * Math.sin(dLat/2) +
-              Math.cos(lat1*Math.PI/180) * Math.cos(lat2*Math.PI/180) *
-              Math.sin(dLon/2) * Math.sin(dLon/2);
-      var c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
-      return 6371000 * c;
-    }
+    let liveTrainMarkers = [];
 
-    function findShortestRoute(startNodeId, endNodeId, options) {
-      var openSet = [startNodeId];
-      var cameFrom = {};
-      var gScore = {};
-      var fScore = {};
-      
-      Object.keys(NODES).forEach(function(id) {
-        gScore[id] = Infinity;
-        fScore[id] = Infinity;
-      });
-      
-      gScore[startNodeId] = 0;
-      fScore[startNodeId] = getHeuristic(NODES[startNodeId], NODES[endNodeId]);
-      
-      while (openSet.length > 0) {
-        var currentId = openSet.reduce(function(lowest, id) {
-          return (fScore[id] < fScore[lowest]) ? id : lowest;
-        }, openSet[0]);
-        
-        if (currentId === endNodeId) {
-          var path = [];
-          var curr = currentId;
-          while (curr !== undefined) {
-            path.push(NODES[curr].coords);
-            curr = cameFrom[curr];
-          }
-          return path.reverse();
+    function updateLiveTrainSimulation() {
+        if (!activeCategories.train) {
+            liveTrainsLayer.clearLayers();
+            return;
         }
+
+        const now = new Date();
+        const totalSec = now.getMinutes() * 60 + now.getSeconds() + now.getMilliseconds() / 1000;
+        const cycleDuration = 300; // 5 minutes per full loop between segments
         
-        openSet = openSet.filter(function(id) { return id !== currentId; });
-        
-        var neighbors = [];
-        EDGES.forEach(function(edge) {
-          if (edge.u === currentId) {
-            neighbors.push({ id: edge.v, edge: edge });
-          } else if (edge.v === currentId) {
-            neighbors.push({ id: edge.u, edge: edge });
-          }
-        });
-        
-        neighbors.forEach(function(neighbor) {
-          var neighborId = neighbor.id;
-          var edge = neighbor.edge;
-          
-          var weight = edge.distance;
-          if (options.wheelchairMode && edge.isStairs) {
-            weight += 5000;
-          }
-          if (options.avoidBrokenElevator && edge.hasBrokenElevator) {
-            weight += 10000;
-          }
-          
-          var tentativeGScore = gScore[currentId] + weight;
-          if (tentativeGScore < gScore[neighborId]) {
-            cameFrom[neighborId] = currentId;
-            gScore[neighborId] = tentativeGScore;
-            fScore[neighborId] = gScore[neighborId] + getHeuristic(NODES[neighborId], NODES[endNodeId]);
+        liveTrainsLayer.clearLayers();
+
+        // Simulate 4 concurrent active trains on the line
+        for (let t = 0; t < 4; t++) {
+            const offset = t * (cycleDuration / 4);
+            const progress = ((totalSec + offset) % cycleDuration) / cycleDuration;
             
-            if (!openSet.includes(neighborId)) {
-              openSet.push(neighborId);
+            const totalSegments = BTS_SUKHUMVIT_TRACK.length - 1;
+            const currentSegIndex = Math.floor(progress * totalSegments);
+            const segFraction = (progress * totalSegments) - currentSegIndex;
+
+            const stA = BTS_SUKHUMVIT_TRACK[currentSegIndex];
+            const stB = BTS_SUKHUMVIT_TRACK[currentSegIndex + 1];
+
+            if (stA && stB) {
+                const trainLat = stA.lat + (stB.lat - stA.lat) * segFraction;
+                const trainLng = stA.lng + (stB.lng - stA.lng) * segFraction;
+
+                const trainIcon = L.divIcon({
+                    className: 'live-train-div',
+                    html: `<div class="train-live-marker" title="BTS Sukhumvit Line Train #${t+1}">🚆</div>`,
+                    iconSize: [28, 28],
+                    iconAnchor: [14, 14]
+                });
+
+                const trainMarker = L.marker([trainLat, trainLng], { icon: trainIcon })
+                    .bindPopup(`
+                        <strong>🚆 รถไฟฟ้า BTS สายสุขุมวิท (ขบวน #${t + 1})</strong><br>
+                        <span style="color: #059669; font-weight: bold;">🟢 กำลังมุ่งหน้า: ${stB.name}</span><br>
+                        <span style="color: #64748b; font-size: 12px;">ออกจาก: ${stA.name} | ความเร็วจำลอง: 45 กม./ชม.</span>
+                    `)
+                    .addTo(liveTrainsLayer);
             }
-          }
-        });
-      }
-      return [];
+        }
     }
 
-    // Handle route display animation
-    window.addEventListener('message', (event) => {
-        const data = event.data;
-        if (data.type === 'DRAW_ROUTE') {
-            const startId = data.startNode || 'paragon_plaza';
-            const endId = data.endNode || 'bts_siam_center';
-            const options = {
-                wheelchairMode: data.wheelchairMode !== false,
-                avoidBrokenElevator: data.avoidBrokenElevator === true
-            };
+    // Run train simulation tick every 2 seconds
+    setInterval(updateLiveTrainSimulation, 2000);
+
+    // 2. Fetch Real GTFS Bus Stops
+    async function loadRealBusStops(lat, lng) {
+        if (!activeCategories.bus) {
+            busStopsLayer.clearLayers();
+            return;
+        }
+        try {
+            const res = await fetch(`http://localhost:8000/api/v1/gtfs/stops/nearby?latitude=${lat}&longitude=${lng}&radius_meters=3000&limit=35`);
+            if (!res.ok) return;
+            const stops = await res.json();
             
-            const routeCoords = findShortestRoute(startId, endId, options);
+            busStopsLayer.clearLayers();
             
-            if (routeCoords.length === 0) {
-                console.warn("No route found between", startId, "and", endId);
+            stops.forEach(stop => {
+                if (!stop.latitude || !stop.longitude) return;
+                
+                const busIcon = L.divIcon({
+                    className: 'custom-poi-marker',
+                    html: `<div class="pin-bubble pin-bus" title="${stop.stop_name}">🚏</div>`,
+                    iconSize: [32, 32],
+                    iconAnchor: [16, 16]
+                });
+                
+                const cleanName = stop.stop_name.replace(/'/g, "\\'");
+                const popupContent = `
+                    <div style="min-width: 170px;">
+                        <strong style="color: #0284c7; font-size: 14px;">🚏 ${stop.stop_name}</strong><br>
+                        <span style="color: #64748b; font-size: 12px;">รหัสป้าย: ${stop.stop_id} | ห่าง ${stop.distance_meters || 0} ม.</span>
+                        <div style="margin-top: 8px;">
+                            <button onclick="navigateRoadTo('${cleanName}', ${stop.latitude}, ${stop.longitude})" 
+                                    style="background: #0284c7; color: white; border: none; border-radius: 6px; padding: 5px 12px; font-size: 12px; cursor: pointer; font-weight: bold; width: 100%;">
+                                📍 นำทางมาป้ายนี้
+                            </button>
+                        </div>
+                    </div>
+                `;
+                
+                L.marker([stop.latitude, stop.longitude], { icon: busIcon })
+                    .bindPopup(popupContent)
+                    .addTo(busStopsLayer);
+            });
+        } catch (e) {
+            console.log("GTFS stops error:", e);
+        }
+    }
+
+    // 3. Fetch Real Places via Overpass API
+    async function loadRealPlaces(lat, lng) {
+        realPlacesLayer.clearLayers();
+        
+        let tags = [];
+        if (activeCategories.train) tags.push('railway=station', 'railway=subway_entrance', 'station=subway', 'station=monorail', 'station=light_rail');
+        if (activeCategories.hospital) tags.push('amenity=hospital', 'amenity=clinic', 'amenity=pharmacy');
+        if (activeCategories.temple) tags.push('amenity=place_of_worship', 'building=temple', 'historic=monastery');
+        if (activeCategories.fuel) tags.push('amenity=fuel');
+        if (activeCategories.store) tags.push('shop=convenience', 'shop=supermarket');
+        
+        if (tags.length === 0) return;
+
+        const tagFilter = tags.map(t => `node[${t}](around:4000, ${lat}, ${lng}); way[${t}](around:4000, ${lat}, ${lng});`).join(' ');
+        const query = `[out:json][timeout:10];(${tagFilter});out center 50;`;
+        const url = `https://overpass-api.de/api/interpreter?data=${encodeURIComponent(query)}`;
+
+        try {
+            const res = await fetch(url);
+            if (!res.ok) return;
+            const data = await res.json();
+            
+            data.elements.forEach(el => {
+                const pLat = el.lat || (el.center && el.center.lat);
+                const pLng = el.lon || (el.center && el.center.lon);
+                if (!pLat || !pLng) return;
+
+                const name = (el.tags && (el.tags['name:th'] || el.tags.name || el.tags.brand)) || 'สถานที่จริง';
+                const amenity = el.tags && (el.tags.amenity || el.tags.shop || el.tags.railway || el.tags.station || el.tags.building || '');
+                
+                let iconClass = 'pin-temple';
+                let iconEmoji = '🛕';
+                let typeLabel = 'วัด / ศาสนสถาน';
+
+                if (el.tags.railway || el.tags.station || name.includes('BTS') || name.includes('MRT') || name.includes('สถานี')) {
+                    iconClass = 'pin-train';
+                    iconEmoji = '🚆';
+                    typeLabel = 'สถานีรถไฟฟ้า BTS / MRT / รถไฟ';
+                } else if (amenity === 'hospital' || amenity === 'clinic' || amenity === 'pharmacy' || name.includes('โรงพยาบาล') || name.includes('คลินิก')) {
+                    iconClass = 'pin-hospital';
+                    iconEmoji = '🏥';
+                    typeLabel = 'โรงพยาบาล / สถานพยาบาล';
+                } else if (amenity === 'place_of_worship' || amenity === 'temple' || name.includes('วัด')) {
+                    iconClass = 'pin-temple';
+                    iconEmoji = '🛕';
+                    typeLabel = 'วัด / ศาสนสถาน';
+                } else if (amenity === 'fuel' || name.includes('ปั๊ม') || name.includes('PTT') || name.includes('บางจาก')) {
+                    iconClass = 'pin-fuel';
+                    iconEmoji = '⛽';
+                    typeLabel = 'ปั๊มน้ำมัน / EV';
+                } else if (amenity === 'convenience' || amenity === 'supermarket' || name.includes('7-Eleven')) {
+                    iconClass = 'pin-store';
+                    iconEmoji = '🏪';
+                    typeLabel = 'ร้านสะดวกซื้อ';
+                }
+
+                const dist = calcDistance(currentUserLat, currentUserLng, pLat, pLng);
+                const markerIcon = L.divIcon({
+                    className: 'custom-poi-marker',
+                    html: `<div class="pin-bubble ${iconClass}" title="${name}">${iconEmoji}</div>`,
+                    iconSize: [34, 34],
+                    iconAnchor: [17, 17]
+                });
+
+                const cleanName = name.replace(/'/g, "\\'");
+                let extraTransitHtml = '';
+                if (iconClass === 'pin-train') {
+                    extraTransitHtml = `<div style="background: #eef2ff; color: #3730a3; padding: 4px 8px; border-radius: 6px; font-size: 11px; margin: 4px 0; font-weight: 500;">
+                        ⏱️ ขบวนถัดไป: ~2-4 นาที (BangkokTransit ETA Simulation)
+                    </div>`;
+                }
+
+                const popupContent = `
+                    <div style="min-width: 190px;">
+                        <strong style="color: #1e293b; font-size: 14px;">${iconEmoji} ${name}</strong><br>
+                        <span style="color: #64748b; font-size: 12px;">ประเภท: ${typeLabel}</span><br>
+                        <span style="color: #059669; font-size: 12px; font-weight: bold;">📍 ห่างจากคุณ ${dist} ม.</span>
+                        ${extraTransitHtml}
+                        <div style="margin-top: 8px;">
+                            <button onclick="navigateRoadTo('${cleanName}', ${pLat}, ${pLng})" 
+                                    style="background: #0D47A1; color: white; border: none; border-radius: 6px; padding: 6px 12px; font-size: 12px; cursor: pointer; font-weight: bold; width: 100%;">
+                                📍 นำทางไปที่นี่จริง
+                            </button>
+                        </div>
+                    </div>
+                `;
+
+                L.marker([pLat, pLng], { icon: markerIcon })
+                    .bindPopup(popupContent)
+                    .addTo(realPlacesLayer);
+            });
+        } catch (e) {
+            console.log("Could not load OSM real places:", e);
+        }
+    }
+
+    // 4. Real Turn-by-Turn Road Routing using OSRM Engine
+    async function navigateRoadTo(destName, destLat, destLng) {
+        window.parent.postMessage({
+            type: 'SELECT_DESTINATION',
+            stop_name: destName,
+            lat: destLat,
+            lng: destLng
+        }, '*');
+
+        if (currentRouteLine) {
+            map.removeLayer(currentRouteLine);
+        }
+
+        try {
+            const routeUrl = `https://router.project-osrm.org/route/v1/driving/${currentUserLng},${currentUserLat};${destLng},${destLat}?overview=full&geometries=geojson`;
+            const res = await fetch(routeUrl);
+            const data = await res.json();
+            
+            if (data.routes && data.routes.length > 0) {
+                const route = data.routes[0];
+                const coords = route.geometry.coordinates.map(c => [c[1], c[0]]);
+                
+                currentRouteLine = L.polyline(coords, {
+                    color: '#0284c7',
+                    weight: 6,
+                    opacity: 0.9,
+                    lineJoin: 'round'
+                }).addTo(map);
+
+                map.fitBounds(currentRouteLine.getBounds(), { padding: [80, 80] });
+                
+                const distKm = (route.distance / 1000).toFixed(1);
+                const timeMin = Math.round(route.duration / 60);
+                
+                L.popup()
+                    .setLatLng([(currentUserLat + destLat)/2, (currentUserLng + destLng)/2])
+                    .setContent(`<strong>🛣️ เส้นทางจริงไปยัง: ${destName}</strong><br>ระยะทาง: ${distKm} กม. | เวลาประมาณ: ${timeMin} นาที`)
+                    .openOn(map);
                 return;
             }
+        } catch (e) {
+            console.log("OSRM routing fallback:", e);
+        }
 
-            if (map.getSource('route')) {
-                map.removeLayer('route');
-                map.removeSource('route');
-            }
+        currentRouteLine = L.polyline([[currentUserLat, currentUserLng], [destLat, destLng]], {
+            color: '#0284c7',
+            weight: 5,
+            dashArray: '8, 8'
+        }).addTo(map);
+        map.fitBounds(currentRouteLine.getBounds(), { padding: [60, 60] });
+    }
 
-            map.addSource('route', {
-                'type': 'geojson',
-                'data': {
-                    'type': 'Feature',
-                    'properties': {},
-                    'geometry': {
-                        'type': 'LineString',
-                        'coordinates': routeCoords
+    function toggleCategory(cat) {
+        activeCategories[cat] = !activeCategories[cat];
+        const chip = document.getElementById('chip' + cat.charAt(0).toUpperCase() + cat.slice(1));
+        if (chip) {
+            chip.classList.toggle('active', activeCategories[cat]);
+        }
+        refreshAllLayers();
+    }
+
+    function refreshAllLayers() {
+        const center = map.getCenter();
+        loadRealBusStops(center.lat, center.lng);
+        loadRealPlaces(center.lat, center.lng);
+        updateLiveTrainSimulation();
+    }
+
+    function locateUser(fly = true) {
+        if ("geolocation" in navigator) {
+            navigator.geolocation.getCurrentPosition(
+                (position) => {
+                    const lat = position.coords.latitude;
+                    const lng = position.coords.longitude;
+                    updateUserMarker(lat, lng, '📍 ตำแหน่งจริงปัจจุบันของคุณ');
+                    if (fly) {
+                        map.flyTo([lat, lng], 16, { duration: 1.5 });
                     }
-                }
-            });
-
-            map.addLayer({
-                'id': 'route',
-                'type': 'line',
-                'source': 'route',
-                'layout': {
-                    'line-join': 'round',
-                    'line-cap': 'round'
+                    refreshAllLayers();
                 },
-                'paint': {
-                    'line-color': '#1565C0',
-                    'line-width': 6,
-                    'line-opacity': 0.8
-                }
-            });
+                (error) => {
+                    console.log("GPS Location unavailable, using default position.", error);
+                    updateUserMarker(DEFAULT_LAT, DEFAULT_LNG);
+                    refreshAllLayers();
+                },
+                { enableHighAccuracy: true, timeout: 8000, maximumAge: 10000 }
+            );
+        } else {
+            updateUserMarker(DEFAULT_LAT, DEFAULT_LNG);
+            refreshAllLayers();
+        }
+    }
 
-            // Center map on route
-            const bounds = routeCoords.reduce((b, coord) => b.extend(coord), new maplibregl.LngLatBounds(routeCoords[0], routeCoords[0]));
-            map.fitBounds(bounds, { padding: 80 });
+    locateUser(true);
+
+    document.getElementById('btnMyLocation').addEventListener('click', () => {
+        locateUser(true);
+    });
+
+    map.on('moveend', () => {
+        refreshAllLayers();
+    });
+
+    // Accessibility Points
+    const POIS = [
+        { type: 'ramp', name: '♿ ทางลาดหลัก สยามพารากอน', lat: 13.7469, lng: 100.5342, desc: 'ความชัน 4.2% มีราวจับคู่มาตรฐาน' },
+        { type: 'ramp', name: '♿ ทางลาดเชื่อม สยามเซ็นเตอร์', lat: 13.7458, lng: 100.5338, desc: 'เชื่อมสกายวอล์ก พื้นผิวไม่ลื่น' },
+        { type: 'elevator', name: '🛗 ลิฟต์ BTS สยาม (ทางออก 3)', lat: 13.7461, lng: 100.5365, desc: 'ใช้งานได้ปกติ ประตูกว้าง 1.5 ม.' },
+        { type: 'elevator', name: '🛗 ลิฟต์ BTS สยาม (ทางออก 5)', lat: 13.7452, lng: 100.5342, desc: 'เชื่อมต่อสยามสแควร์วัน' },
+        { type: 'broken', name: '🚫 ลิฟต์ฝั่งเหนือ (ปรับปรุง)', lat: 13.7465, lng: 100.5358, desc: 'ปิดปรับปรุง มีทางลาดสะพานลอยทดแทน' },
+        { type: 'tactile', name: '🦯 ทางเดินเบรลล์บล็อก (Tactile)', lat: 13.7455, lng: 100.5335, desc: 'เส้นทางนำทางคนตาบอดต่อเนื่อง 200 ม.' },
+        { type: 'hazard', name: '⚠️ งานซ่อมผิวทางเท้า', lat: 13.7456, lng: 100.5355, desc: 'จุดเสี่ยง: กำลังซ่อมกระเบื้องทางเท้า' }
+    ];
+
+    function getPinClass(type) {
+        switch(type) {
+            case 'ramp': return 'pin-ramp';
+            case 'elevator': return 'pin-elevator';
+            case 'broken': return 'pin-broken';
+            case 'tactile': return 'pin-tactile';
+            case 'hazard': return 'pin-hazard';
+            default: return 'pin-ramp';
+        }
+    }
+
+    function getPinEmoji(type) {
+        switch(type) {
+            case 'ramp': return '♿';
+            case 'elevator': return '🛗';
+            case 'broken': return '🚫';
+            case 'tactile': return '🦯';
+            case 'hazard': return '⚠️';
+            default: return '📍';
+        }
+    }
+
+    POIS.forEach(poi => {
+        const icon = L.divIcon({
+            className: 'custom-poi-marker',
+            html: `<div class="pin-bubble ${getPinClass(poi.type)}">${getPinEmoji(poi.type)}</div>`,
+            iconSize: [36, 36],
+            iconAnchor: [18, 18]
+        });
+
+        L.marker([poi.lat, poi.lng], { icon: icon })
+            .bindPopup(`<strong>${poi.name}</strong><br><span style="color:#555;font-size:13px;">${poi.desc}</span>`)
+            .addTo(accessibilityLayer);
+    });
+
+    window.addEventListener('message', (event) => {
+        if (!event.data) return;
+        const data = event.data;
+        if (data.type === 'SET_USER_LOCATION') {
+            const lat = parseFloat(data.latitude);
+            const lng = parseFloat(data.longitude);
+            if (!isNaN(lat) && !isNaN(lng)) {
+                updateUserMarker(lat, lng, data.label || '📍 ตำแหน่งปัจจุบันของคุณ');
+                map.flyTo([lat, lng], 16, { duration: 1.2 });
+                refreshAllLayers();
+            }
         }
     });
 </script>

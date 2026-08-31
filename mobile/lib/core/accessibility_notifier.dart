@@ -10,6 +10,7 @@ class AccessibilityState {
   final bool voiceEnabled;
   final bool hapticEnabled;
   final bool highContrast;
+  final bool colorBlind;
   final double fontScale;
   final String language;
   final String userName;
@@ -20,6 +21,7 @@ class AccessibilityState {
     this.voiceEnabled = true,
     this.hapticEnabled = true,
     this.highContrast = false,
+    this.colorBlind = false,
     this.fontScale = 1.0,
     this.language = 'th',
     this.userName = 'ผู้ใช้งาน',
@@ -31,6 +33,7 @@ class AccessibilityState {
     bool? voiceEnabled,
     bool? hapticEnabled,
     bool? highContrast,
+    bool? colorBlind,
     double? fontScale,
     String? language,
     String? userName,
@@ -41,6 +44,7 @@ class AccessibilityState {
       voiceEnabled: voiceEnabled ?? this.voiceEnabled,
       hapticEnabled: hapticEnabled ?? this.hapticEnabled,
       highContrast: highContrast ?? this.highContrast,
+      colorBlind: colorBlind ?? this.colorBlind,
       fontScale: fontScale ?? this.fontScale,
       language: language ?? this.language,
       userName: userName ?? this.userName,
@@ -54,6 +58,7 @@ class AccessibilityState {
       'voice_enabled': voiceEnabled,
       'haptic_enabled': hapticEnabled,
       'high_contrast': highContrast,
+      'color_blind': colorBlind,
       'font_scale': fontScale,
       'language': language,
     };
@@ -66,7 +71,7 @@ class AccessibilityNotifier extends StateNotifier<AccessibilityState> {
 
   AccessibilityNotifier({ApiClient? apiClient})
       : _apiClient = apiClient ?? ApiClient(),
-        super(const AccessibilityState(accessibilityMode: 'wheelchair')) {
+        super(const AccessibilityState(accessibilityMode: 'visual')) {
     _loadFromLocal();
   }
 
@@ -75,10 +80,11 @@ class AccessibilityNotifier extends StateNotifier<AccessibilityState> {
     try {
       final prefs = await SharedPreferences.getInstance();
       state = AccessibilityState(
-        accessibilityMode: prefs.getString('acc_mode') ?? 'wheelchair',
+        accessibilityMode: 'visual',
         voiceEnabled: prefs.getBool('voice_enabled') ?? true,
         hapticEnabled: prefs.getBool('haptic_enabled') ?? true,
         highContrast: prefs.getBool('high_contrast') ?? false,
+        colorBlind: prefs.getBool('color_blind') ?? false,
         fontScale: prefs.getDouble('font_scale') ?? 1.0,
         language: prefs.getString('language') ?? 'th',
         userName: prefs.getString('user_name') ?? 'ผู้ใช้งาน',
@@ -93,10 +99,11 @@ class AccessibilityNotifier extends StateNotifier<AccessibilityState> {
   Future<void> _saveToLocal() async {
     try {
       final prefs = await SharedPreferences.getInstance();
-      await prefs.setString('acc_mode', state.accessibilityMode);
+      await prefs.setString('acc_mode', 'visual');
       await prefs.setBool('voice_enabled', state.voiceEnabled);
       await prefs.setBool('haptic_enabled', state.hapticEnabled);
       await prefs.setBool('high_contrast', state.highContrast);
+      await prefs.setBool('color_blind', state.colorBlind);
       await prefs.setDouble('font_scale', state.fontScale);
       await prefs.setString('language', state.language);
       await prefs.setString('user_name', state.userName);
@@ -125,36 +132,10 @@ class AccessibilityNotifier extends StateNotifier<AccessibilityState> {
   }
 
   void setMode(String mode) {
-    if (mode == 'visual') {
-      state = state.copyWith(
-        accessibilityMode: mode,
-        voiceEnabled: true,
-        highContrast: true,
-        fontScale: 1.0,
-      );
-      updateWebPreference('high_contrast', 'true');
-      updateWebPreference('theme', 'dark');
-    } else if (mode == 'wheelchair') {
-      state = state.copyWith(
-        accessibilityMode: mode,
-        voiceEnabled: false,
-        highContrast: false,
-        fontScale: 1.0,
-      );
-      updateWebPreference('high_contrast', 'false');
-      updateWebPreference('theme', 'light');
-    } else if (mode == 'speech_hearing') {
-      state = state.copyWith(
-        accessibilityMode: mode,
-        voiceEnabled: false,
-        highContrast: false,
-        fontScale: 1.0,
-      );
-      updateWebPreference('high_contrast', 'false');
-      updateWebPreference('theme', 'light');
-    } else {
-      state = state.copyWith(accessibilityMode: mode);
-    }
+    state = state.copyWith(
+      accessibilityMode: 'visual',
+      voiceEnabled: true,
+    );
     _syncToBackend();
   }
 
@@ -175,6 +156,12 @@ class AccessibilityNotifier extends StateNotifier<AccessibilityState> {
     _syncToBackend();
   }
 
+  void toggleColorBlind(bool enabled) {
+    state = state.copyWith(colorBlind: enabled);
+    updateWebPreference('color_blind', enabled.toString());
+    _syncToBackend();
+  }
+
   void setFontScale(double scale) {
     state = state.copyWith(fontScale: scale);
     _syncToBackend();
@@ -191,7 +178,7 @@ class AccessibilityNotifier extends StateNotifier<AccessibilityState> {
   }
 
   void logout() {
-    state = const AccessibilityState(accessibilityMode: 'wheelchair');
+    state = const AccessibilityState(accessibilityMode: 'visual');
     _saveToLocal();
   }
 

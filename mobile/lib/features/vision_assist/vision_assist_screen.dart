@@ -1,14 +1,19 @@
 import 'dart:async';
+import 'dart:math' as math;
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter/semantics.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:camera/camera.dart';
+import 'package:geolocator/geolocator.dart';
 import '../../core/accessibility_notifier.dart';
 import '../../core/api_client.dart';
-import '../../core/tts_helper.dart';
 import '../../core/tflite_service.dart';
+import '../../core/tts_helper.dart';
+import '../../core/risk_engine.dart';
+import '../../core/app_colors.dart';
+import '../../core/services/vision_trigger.dart';
 import 'dart:convert';
 import 'camera_loader.dart';
 
@@ -30,13 +35,62 @@ class DetectedObstacle {
   });
 
   factory DetectedObstacle.fromJson(Map<String, dynamic> json) {
+    String lbl = (json['class'] ?? json['label'] ?? json['name'] ?? 'obstacle').toString().trim();
+    double sc = (json['score'] ?? json['confidence'] ?? 0.9).toDouble();
+    if (sc > 1.0) sc = sc / 100.0;
+
+    double xVal = 0.3, yVal = 0.3, wVal = 0.4, hVal = 0.4;
+
+    if (json.containsKey('bbox_2d') && json['bbox_2d'] is List) {
+      final List<dynamic> bbox = json['bbox_2d'];
+      if (bbox.length >= 4) {
+        double p0 = (bbox[0] as num).toDouble();
+        double p1 = (bbox[1] as num).toDouble();
+        double p2 = (bbox[2] as num).toDouble();
+        double p3 = (bbox[3] as num).toDouble();
+
+        // Check if scale is 0-1000 (common in Qwen/Vision) or 0-1
+        if (p0 > 1.0 || p1 > 1.0 || p2 > 1.0 || p3 > 1.0) {
+          p0 /= 1000.0; p1 /= 1000.0; p2 /= 1000.0; p3 /= 1000.0;
+        }
+
+        // Standard [xmin, ymin, xmax, ymax]
+        final double minX = math.min(p0, p2);
+        final double maxX = math.max(p0, p2);
+        final double minY = math.min(p1, p3);
+        final double maxY = math.max(p1, p3);
+
+        xVal = minX.clamp(0.0, 1.0);
+        yVal = minY.clamp(0.0, 1.0);
+        wVal = (maxX - minX).clamp(0.05, 1.0);
+        hVal = (maxY - minY).clamp(0.05, 1.0);
+      }
+    } else {
+      xVal = (json['x'] ?? 0.3).toDouble();
+      yVal = (json['y'] ?? 0.3).toDouble();
+      wVal = (json['w'] ?? 0.4).toDouble();
+      hVal = (json['h'] ?? 0.4).toDouble();
+      if (xVal > 1.0) xVal /= 1000.0;
+      if (yVal > 1.0) yVal /= 1000.0;
+      if (wVal > 1.0) wVal /= 1000.0;
+      if (hVal > 1.0) hVal /= 1000.0;
+    }
+
+    // Standard Synonym Normalization only (e.g. column -> pillar)
+    String normalizedLabel = lbl.toLowerCase().trim();
+    if (normalizedLabel == 'column' || normalizedLabel == 'post' || normalizedLabel == 'pole') {
+      normalizedLabel = 'pillar';
+    } else {
+      normalizedLabel = lbl;
+    }
+
     return DetectedObstacle(
-      label: json['class'] ?? '',
-      score: (json['score'] ?? 0.0).toDouble(),
-      x: (json['x'] ?? 0.0).toDouble(),
-      y: (json['y'] ?? 0.0).toDouble(),
-      w: (json['w'] ?? 0.0).toDouble(),
-      h: (json['h'] ?? 0.0).toDouble(),
+      label: normalizedLabel,
+      score: sc,
+      x: xVal,
+      y: yVal,
+      w: wVal,
+      h: hVal,
     );
   }
 }
@@ -48,7 +102,7 @@ class VisionAssistScreen extends ConsumerStatefulWidget {
   ConsumerState<VisionAssistScreen> createState() => _VisionAssistScreenState();
 }
 
-class _VisionAssistScreenState extends ConsumerState<VisionAssistScreen> with TickerProviderStateMixin {
+class _VisionAssistScreenState extends ConsumerState<VisionAssistScreen> with TickerProviderStateMixin, WidgetsBindingObserver {
   CameraController? _cameraController;
   bool _isCameraInitialized = false;
   bool _hasCameraPermission = true;
@@ -61,23 +115,54 @@ class _VisionAssistScreenState extends ConsumerState<VisionAssistScreen> with Ti
   Timer? _hapticTimer;
   double _simulatedProximity = 0.0; 
   List<DetectedObstacle> _obstacles = [];
+  bool _isAnalyzingShot = false;
+  DateTime? _lastBarrierReportTime;
+  bool _isSavingBarrier = false;
+  final FocusNode _keyboardFocusNode = FocusNode();
+  
+  /// Event-Driven Vision Trigger (ข้อ 8 ของอาจารย์)
+  /// Camera เปิดเฉพาะเมื่อ Risk Engine trigger หรือผู้ใช้สั่งเสียง
+  final VisionTrigger _visionTrigger = VisionTrigger();
+  
+  /// Layer 1 On-Device Detection Engine (YOLO / TFLite)
   final TfliteService _tfliteService = TfliteService();
-  bool _isProcessingFrame = false;
-  DateTime? _lastSpeechTime;
+  bool _isTfliteReady = false;
   
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _boxAnimController = AnimationController(vsync: this, duration: const Duration(seconds: 4))..repeat(reverse: true);
     _pulseController = AnimationController(vsync: this, duration: const Duration(milliseconds: 500))..repeat(reverse: true);
     
-    _tfliteService.loadModel();
     _initCamera();
+    _initOnDeviceModel();
+  }
+
+  Future<void> _initOnDeviceModel() async {
+    try {
+      await _tfliteService.loadModel();
+      if (mounted) {
+        setState(() {
+          _isTfliteReady = true;
+        });
+      }
+    } catch (e) {
+      debugPrint('[Layer 1 YOLO] Model init error: $e');
+    }
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.paused || state == AppLifecycleState.inactive || state == AppLifecycleState.hidden) {
+      _stopSimulation();
+      _cameraController?.pausePreview();
+    } else if (state == AppLifecycleState.resumed) {
+      _cameraController?.resumePreview();
+    }
   }
   
   Future<void> _initCamera() async {
-    // Web camera is fully supported
-    
     try {
       final cameras = await availableCameras();
       final backCamera = cameras.firstWhere(
@@ -89,218 +174,315 @@ class _VisionAssistScreenState extends ConsumerState<VisionAssistScreen> with Ti
         backCamera,
         ResolutionPreset.medium,
         enableAudio: false,
+        imageFormatGroup: ImageFormatGroup.jpeg,
       );
       
       await _cameraController!.initialize();
-      setState(() {
-        _isCameraInitialized = true;
-      });
+      try {
+        await _cameraController!.lockCaptureOrientation(DeviceOrientation.portraitUp);
+      } catch (_) {}
+
+      if (mounted) {
+        setState(() {
+          _isCameraInitialized = true;
+        });
+      }
     } catch (e) {
-      setState(() {
-        _hasCameraPermission = false;
-        _isCameraInitialized = false;
-      });
+      if (mounted) {
+        setState(() {
+          _hasCameraPermission = false;
+          _isCameraInitialized = false;
+        });
+      }
     }
   }
 
   void _toggleScan() {
-    setState(() {
-      _isScanning = !_isScanning;
-      if (_isScanning) {
-        SemanticsService.announce("เริ่มต้นสแกนสิ่งกีดขวาง", TextDirection.ltr);
-        _startSimulation();
-      } else {
-        SemanticsService.announce("หยุดสแกนสิ่งกีดขวาง", TextDirection.ltr);
-        _stopSimulation();
-      }
-    });
-  }
-
-  void _speakObstaclesPeriodically() {
-    if (!_isScanning || _obstacles.isEmpty) return;
-
-    final now = DateTime.now();
-    if (_lastSpeechTime == null || now.difference(_lastSpeechTime!) > const Duration(milliseconds: 2500)) {
-      _lastSpeechTime = now;
-      final warnings = _obstacles
-          .where((obs) => (obs.y + obs.h) >= 0.15) // Only close/relevant ones
-          .map((obs) => _getThaiLabel(obs.label))
-          .toSet() // Remove duplicate labels
-          .join(' และ ');
-      if (warnings.isNotEmpty) {
-        final acc = ref.read(accessibilityProvider);
-        announceSpeech('พบ $warnings ด้านหน้า', acc.voiceEnabled);
-      }
-    }
-  }
-
-  void _startSimulation() {
-    if (kIsWeb) {
-      _hapticTimer = Timer.periodic(const Duration(milliseconds: 100), (timer) {
-        if (!_isScanning) {
-          timer.cancel();
-          return;
-        }
-        
-        final realProximity = captureProximity();
-        
-        List<DetectedObstacle> parsedObstacles = [];
-        try {
-          final rawJson = captureObstacles();
-          final List<dynamic> decoded = jsonDecode(rawJson);
-          parsedObstacles = decoded.map((item) => DetectedObstacle.fromJson(item)).toList();
-        } catch (e) {
-          // Ignored
-        }
-
-        // Enrich simulator dataset with specific requested classes if empty
-        if (parsedObstacles.isEmpty && realProximity >= 0.15) {
-          if (realProximity >= 0.50) {
-            parsedObstacles.add(DetectedObstacle(
-              label: 'pole', // เสาไฟฟ้า
-              score: 0.89,
-              x: 0.15,
-              y: 0.20,
-              w: 0.20,
-              h: 0.60,
-            ));
-            parsedObstacles.add(DetectedObstacle(
-              label: 'elevator', // ลิฟต์
-              score: 0.95,
-              x: 0.50,
-              y: 0.10,
-              w: 0.45,
-              h: 0.80,
-            ));
-          }
-          if (realProximity >= 0.30) {
-            parsedObstacles.add(DetectedObstacle(
-              label: 'pothole', // หลุม
-              score: 0.88,
-              x: 0.35,
-              y: 0.65,
-              w: 0.30,
-              h: 0.20,
-            ));
-            parsedObstacles.add(DetectedObstacle(
-              label: 'door', // ประตู
-              score: 0.91,
-              x: 0.70,
-              y: 0.20,
-              w: 0.25,
-              h: 0.70,
-            ));
-          }
-          if (realProximity >= 0.15) {
-            parsedObstacles.add(DetectedObstacle(
-              label: 'stairs', // บันได
-              score: 0.92,
-              x: 0.40,
-              y: 0.40,
-              w: 0.35,
-              h: 0.35,
-            ));
-            parsedObstacles.add(DetectedObstacle(
-              label: 'person', // คน
-              score: 0.82,
-              x: 0.05,
-              y: 0.15,
-              w: 0.25,
-              h: 0.75,
-            ));
-            parsedObstacles.add(DetectedObstacle(
-              label: 'car', // รถยนต์
-              score: 0.87,
-              x: 0.80,
-              y: 0.50,
-              w: 0.18,
-              h: 0.30,
-            ));
-          }
-        }
-
-        if (mounted) {
-          setState(() {
-            _simulatedProximity = realProximity;
-            _obstacles = parsedObstacles;
-          });
-          _speakObstaclesPeriodically();
-        }
-        
-        // Vibrate only if an obstacle is within range (proximity threshold > 0.15)
-        if (realProximity >= 0.15) {
-          final tickInterval = ((1.0 - realProximity) * 8 + 1).toInt();
-          if (timer.tick % tickInterval == 0) {
-            final acc = ref.read(accessibilityProvider);
-            if (acc.hapticEnabled) {
-              HapticFeedback.lightImpact();
-            }
-          }
-        }
-      });
-      return;
-    }
-
-    // On-Device Native YOLOv11-Nano TFLite image stream execution
-    if (_cameraController != null && _isCameraInitialized) {
-      _cameraController!.startImageStream((CameraImage image) async {
-        if (!_isScanning) return;
-        if (_isProcessingFrame) return;
-
-        _isProcessingFrame = true;
-        try {
-          final results = await _tfliteService.detectOnFrame(image);
-          final parsed = results.map((item) => DetectedObstacle.fromJson(item)).toList();
-          
-          double maxProximity = 0.0;
-          for (var obs in parsed) {
-            final proximity = obs.y + obs.h; // Bottom of bounding box represents proximity
-            if (proximity > maxProximity) {
-              maxProximity = proximity;
-            }
-          }
-
-          if (mounted && _isScanning) {
-            setState(() {
-              _obstacles = parsed;
-              _simulatedProximity = maxProximity;
-            });
-            _speakObstaclesPeriodically();
-
-            if (maxProximity >= 0.15) {
-              final acc = ref.read(accessibilityProvider);
-              if (acc.hapticEnabled) {
-                HapticFeedback.lightImpact();
-              }
-            }
-          }
-        } catch (e) {
-          // Ignored
-        } finally {
-          _isProcessingFrame = false;
-        }
-      });
-    }
-  }
-  
-  void _stopSimulation() {
-    if (kIsWeb) {
-      _hapticTimer?.cancel();
-      _hapticTimer = null;
+    if (_isScanning) {
+      _stopScanning();
     } else {
-      if (_cameraController != null && _isCameraInitialized) {
+      _startScanning();
+    }
+  }
+
+  void _startScanning() {
+    setState(() {
+      _isScanning = true;
+    });
+    SemanticsService.announce("เริ่มต้นสแกนสิ่งกีดขวางระบบ 2 ชั้น", TextDirection.ltr);
+    HapticFeedback.mediumImpact();
+    _runContinuousScanLoop();
+  }
+
+  void _stopScanning() {
+    setState(() {
+      _isScanning = false;
+      _isAnalyzingShot = false;
+      _obstacles = [];
+      _simulatedProximity = 0.0;
+    });
+    SemanticsService.announce("หยุดสแกน", TextDirection.ltr);
+    HapticFeedback.lightImpact();
+  }
+
+  Future<void> _runContinuousScanLoop() async {
+    while (mounted && _isScanning) {
+      await _executeSingleShotAnalysis();
+      if (!mounted || !_isScanning) break;
+      // Wait 3 seconds steadily between frames for maximum accuracy
+      await Future.delayed(const Duration(seconds: 3));
+    }
+  }
+
+  /// 📸 2-Layer Detection Pipeline:
+  /// Layer 1: Fast Edge Real-Time YOLO / TFLite (On-Device, 100% Offline, Low-latency)
+  /// Layer 2: Cloud / Backend Vision AI API (Deep Semantic Context & Thai Voice Reasoning)
+  Future<void> _executeSingleShotAnalysis() async {
+    if (!mounted || !_isScanning || _isAnalyzingShot) return;
+    final acc = ref.read(accessibilityProvider);
+
+    setState(() {
+      _isAnalyzingShot = true;
+    });
+
+    List<DetectedObstacle> layer1Detections = [];
+    List<DetectedObstacle> layer2Detections = [];
+
+    try {
+      if (_cameraController != null && _cameraController!.value.isInitialized) {
+        final xFile = await _cameraController!.takePicture();
+        final bytes = await xFile.readAsBytes();
+        final base64Img = base64Encode(bytes);
+
+        // --- LAYER 1: Fast On-Device YOLO / TFLite Inference ---
         try {
-          _cameraController!.stopImageStream();
+          final tfliteResults = await _tfliteService.detectOnBase64(base64Img);
+          if (tfliteResults.isNotEmpty) {
+            for (var item in tfliteResults) {
+              layer1Detections.add(DetectedObstacle.fromJson(item));
+            }
+          }
         } catch (e) {
-          // Ignored
+          debugPrint('[Layer 1 YOLO] On-device inference error: $e');
+        }
+
+        // --- LAYER 2: Cloud / Backend Vision AI Deep Context Analysis ---
+        try {
+          final description = await ApiClient().analyzeVisionImage(
+            base64Img,
+            prompt: 'You are an objective computer vision obstacle detector for visually impaired pedestrian navigation.\n'
+                'Analyze this camera image and accurately detect ONLY real, physical, and hazardous obstacles directly on or near the walking path (such as pole, stairs, pothole, curb, barrier, chair, table, vehicle, pedestrian, uneven ground).\n'
+                'CRITICAL RULES:\n'
+                '- Do NOT detect standard background structures (e.g. plain walls, ceilings, floors) or small wall attachments (e.g. power sockets, switches) unless they pose a direct physical collision hazard.\n'
+                '- If the path is clear and no actual hazards are present, return an empty JSON array: [].\n'
+                'Return ONLY a valid JSON array of objects without extra commentary:\n'
+                '[{"label": "pole", "score": 0.95, "bbox_2d": [xmin, ymin, xmax, ymax]}]\n'
+                'where coordinates are normalized 0 to 1000.',
+          ).timeout(const Duration(seconds: 10));
+
+          String jsonStr = description.trim();
+          final startIdx = jsonStr.indexOf('[');
+          final endIdx = jsonStr.lastIndexOf(']');
+          if (startIdx != -1 && endIdx != -1 && endIdx > startIdx) {
+            jsonStr = jsonStr.substring(startIdx, endIdx + 1);
+            final List<dynamic> decoded = jsonDecode(jsonStr);
+            layer2Detections = decoded.map((item) => DetectedObstacle.fromJson(item)).toList();
+          }
+        } catch (e) {
+          debugPrint('[Layer 2 API] Vision AI error: $e');
+        }
+      }
+    } catch (e) {
+      debugPrint('[Vision 2-Layer] Frame capture error: $e');
+    }
+
+    // --- 2-LAYER FUSION & RISK ASSESSMENT ---
+    // Merge Layer 1 (instant edge) + Layer 2 (semantic cloud), deduplicating overlapping boxes
+    final Map<String, DetectedObstacle> mergedMap = {};
+    for (var o in layer1Detections) {
+      final key = '${o.label}_${(o.x * 10).toInt()}_${(o.y * 10).toInt()}';
+      mergedMap[key] = o;
+    }
+    for (var o in layer2Detections) {
+      final key = '${o.label}_${(o.x * 10).toInt()}_${(o.y * 10).toInt()}';
+      mergedMap[key] = o;
+    }
+
+    final List<DetectedObstacle> unifiedDetections = mergedMap.values.toList();
+
+    const profile = 'visual';
+    final List<DetectedObstacle> verifiedObstacles = [];
+    double maxProximity = 0.0;
+    List<String> warningsList = [];
+
+    for (var obs in unifiedDetections) {
+      final assessment = AccessibilityRiskEngine.assess(obs, profile);
+      verifiedObstacles.add(obs);
+
+      final proximity = assessment.estimatedDistanceMeters;
+      final proximityIndex = (10.0 - proximity).clamp(0.0, 10.0) / 10.0;
+      if (proximityIndex > maxProximity) {
+        maxProximity = proximityIndex;
+      }
+
+      if (assessment.warningMessage.isNotEmpty) {
+        warningsList.add(assessment.warningMessage);
+      }
+    }
+
+    if (mounted && _isScanning) {
+      setState(() {
+        _isAnalyzingShot = false;
+        _obstacles = verifiedObstacles;
+        _simulatedProximity = verifiedObstacles.isNotEmpty ? maxProximity : 0.0;
+      });
+
+      if (warningsList.isNotEmpty) {
+        final warningsText = warningsList.toSet().join(' และ ');
+        announceSpeech(warningsText, acc.voiceEnabled);
+      } else if (verifiedObstacles.isNotEmpty) {
+        final labels = verifiedObstacles.map((o) => _getThaiLabel(o.label)).toSet().join(', ');
+        final distStr = _formatDistanceText(_getEstimatedDistanceMeters(_simulatedProximity));
+        announceSpeech('ตรวจพบ $labels ด้านหน้า ระยะ $distStr', acc.voiceEnabled);
+      }
+
+      if (acc.hapticEnabled && verifiedObstacles.isNotEmpty) {
+        HapticFeedback.lightImpact();
+      }
+
+      // Auto-save high-hazard obstacles to GIS
+      final highHazards = verifiedObstacles.where((o) {
+        final l = o.label.toLowerCase();
+        return l == 'pothole' || l == 'stairs' || l == 'construction' || l == 'crack' || l == 'pole' || l == 'pillar' || l == 'barrier';
+      }).toList();
+
+      if (highHazards.isNotEmpty && _simulatedProximity >= 0.25) {
+        final now = DateTime.now();
+        if (_lastBarrierReportTime == null || now.difference(_lastBarrierReportTime!).inSeconds > 25) {
+          _recordBarrierToGis(specificLabel: highHazards.first.label, isManual: false);
         }
       }
     }
+  }
+
+  void _stopSimulation() {
+    _hapticTimer?.cancel();
+    _hapticTimer = null;
     setState(() {
       _simulatedProximity = 0.0;
       _obstacles = [];
-      _lastSpeechTime = null;
+      _isScanning = false;
     });
+  }
+
+  double _getEstimatedDistanceMeters(double proximity) {
+    if (proximity <= 0.05) return 5.0;
+    final dist = 0.38 / (proximity.clamp(0.08, 1.0));
+    return (dist * 10).round() / 10.0;
+  }
+
+  String _formatDistanceText(double meters) {
+    if (meters < 1.0) {
+      final cm = (meters * 100).round();
+      return '$cm ซม.';
+    }
+    return '${meters.toStringAsFixed(1)} ม.';
+  }
+
+  bool _isActionableObstacleOrFacility(String label) {
+    final l = label.toLowerCase();
+    // Exclude normal pedestrians / background items from spoken voice alerts
+    if (l == 'person' || l == 'people' || l == 'pedestrian' || l == 'tree' || l == 'plant' || l == 'grass') {
+      return false;
+    }
+    return true;
+  }
+
+  /// บันทึกอุปสรรคลงฐานข้อมูล GIS (PostGIS) เพื่อจดจำตำแหน่งและแชร์ให้ผู้ใช้ทุกคน
+  Future<void> _recordBarrierToGis({String? specificLabel, bool isManual = false}) async {
+    if (_isSavingBarrier) return;
+    _isSavingBarrier = true;
+    _lastBarrierReportTime = DateTime.now();
+
+    try {
+      LocationPermission permission = await Geolocator.checkPermission();
+      if (permission == LocationPermission.denied) {
+        permission = await Geolocator.requestPermission();
+      }
+
+      Position pos;
+      try {
+        pos = await Geolocator.getCurrentPosition(
+          desiredAccuracy: LocationAccuracy.high,
+          timeLimit: const Duration(seconds: 4),
+        );
+      } catch (_) {
+        pos = (await Geolocator.getLastKnownPosition()) ??
+            Position(
+              latitude: 14.8818,
+              longitude: 102.0245,
+              timestamp: DateTime.now(),
+              accuracy: 10.0,
+              altitude: 0.0,
+              altitudeAccuracy: 0.0,
+              heading: 0.0,
+              headingAccuracy: 0.0,
+              speed: 0.0,
+              speedAccuracy: 0.0,
+            );
+      }
+
+      String targetLabel = specificLabel ?? '';
+      if (targetLabel.isEmpty) {
+        if (_obstacles.isNotEmpty) {
+          final priority = _obstacles.where((o) => _isActionableObstacleOrFacility(o.label)).toList();
+          targetLabel = priority.isNotEmpty ? priority.first.label : _obstacles.first.label;
+        } else {
+          targetLabel = 'obstacle';
+        }
+      }
+
+      final thaiName = _getThaiLabel(targetLabel);
+      final success = await ApiClient().reportBarrier(
+        type: targetLabel,
+        lat: pos.latitude,
+        lng: pos.longitude,
+        severity: 'high',
+        description: 'ตรวจพบ $thaiName โดยกล้อง AI Vision (พิกัด: ${pos.latitude.toStringAsFixed(5)}, ${pos.longitude.toStringAsFixed(5)})',
+      );
+
+      if (success) {
+        if (mounted) {
+          final acc = ref.read(accessibilityProvider);
+          if (isManual) {
+            announceSpeech('บันทึกตำแหน่ง $thaiName ลงระบบแผนที่ส่วนกลางสำเร็จ', acc.voiceEnabled);
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: Row(
+                  children: [
+                    const Icon(Icons.check_circle, color: Colors.lightGreenAccent),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Text('📍 บันทึกตำแหน่ง $thaiName ลงฐานข้อมูลแผนที่สำเร็จ (${pos.latitude.toStringAsFixed(4)}, ${pos.longitude.toStringAsFixed(4)})'),
+                    ),
+                  ],
+                ),
+                backgroundColor: Colors.grey[900],
+                behavior: SnackBarBehavior.floating,
+                duration: const Duration(seconds: 3),
+              ),
+            );
+          }
+        }
+      }
+    } catch (_) {
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isSavingBarrier = false;
+        });
+      }
+    }
   }
   
   Future<void> _toggleFlashlight() async {
@@ -321,9 +503,50 @@ class _VisionAssistScreenState extends ConsumerState<VisionAssistScreen> with Ti
   }
 
   String _getThaiLabel(String label) {
-    switch (label.toLowerCase()) {
+    switch (label.toLowerCase().trim()) {
+      case 'pillar':
+      case 'pole':
+      case 'column':
+      case 'post':
+        return 'เสา';
+      case 'fan':
+      case 'electric fan':
+      case 'wall fan':
+        return 'พัดลม';
+      case 'wall':
+        return 'ผนัง / กำแพง';
+      case 'pothole':
+      case 'hole':
+      case 'pit':
+        return 'หลุมบนทางเดิน';
+      case 'stairs':
+      case 'step':
+      case 'steps':
+        return 'บันได';
+      case 'ramp':
+      case 'wheelchair_ramp':
+        return 'ทางลาดชัน';
+      case 'curb':
+        return 'ขอบทางเท้า';
+      case 'bench':
+        return 'ม้านั่ง';
+      case 'door':
+        return 'ประตู';
+      case 'chair':
+        return 'เก้าอี้';
+      case 'table':
+      case 'dining table':
+        return 'โต๊ะ';
+      case 'plug':
+      case 'socket':
+        return 'ปลั๊กไฟ';
+      case 'wire':
+      case 'cable':
+        return 'สายไฟ';
       case 'person':
-        return 'คน';
+      case 'people':
+      case 'pedestrian':
+        return 'คนเดินเท้า';
       case 'car':
         return 'รถยนต์';
       case 'motorcycle':
@@ -335,25 +558,12 @@ class _VisionAssistScreenState extends ConsumerState<VisionAssistScreen> with Ti
         return 'ลิฟต์';
       case 'crosswalk':
         return 'ทางม้าลาย';
-      case 'pothole':
-        return 'หลุม';
-      case 'stairs':
-        return 'บันได';
-      case 'ramp':
-        return 'ทางลาดชัน';
-      case 'pole':
-        return 'เสาไฟฟ้า';
-      case 'door':
-        return 'ประตู';
-      case 'chair':
-        return 'เก้าอี้';
-      case 'table':
-      case 'dining table':
-        return 'โต๊ะ';
-      case 'bottle':
-        return 'ขวดน้ำ';
-      case 'cup':
-        return 'แก้วน้ำ';
+      case 'barrier':
+      case 'construction':
+        return 'สิ่งกีดขวาง / เขตก่อสร้าง';
+      case 'plant':
+      case 'tree':
+        return 'ต้นไม้ / กระถางต้นไม้';
       default:
         return label;
     }
@@ -361,59 +571,77 @@ class _VisionAssistScreenState extends ConsumerState<VisionAssistScreen> with Ti
 
   String _getWarningText() {
     if (_obstacles.isEmpty) {
-      if (_simulatedProximity >= 0.5) {
-        return '⚠️ ตรวจพบ: สิ่งกีดขวางข้างหน้า!';
-      } else if (_simulatedProximity >= 0.15) {
-        return '⚠️ ตรวจพบ: อุปสรรคบนพื้นข้างหน้า!';
-      }
-      return '🟢 พื้นผิวราบรื่น / ทางสะดวก';
+      return '🟢 ทางสะดวก (ไม่พบสิ่งกีดขวาง)';
     }
 
-    // Find the closest obstacle (maximum proximity / closest bottom Y)
-    DetectedObstacle? closest;
-    double maxY = 0.0;
-    for (var obs in _obstacles) {
-      final bottomY = obs.y + obs.h;
-      if (bottomY > maxY) {
-        maxY = bottomY;
-        closest = obs;
-      }
+    final distM = _getEstimatedDistanceMeters(_simulatedProximity);
+    final distStr = _formatDistanceText(distM);
+
+    // Prioritize direct physical hazards (เสา, บันได, หลุม, ทางต่างระดับ, สิ่งกีดขวาง, ยานพาหนะ)
+    const priorityLabels = {
+      'pillar', 'pole', 'column', 'post',
+      'stairs', 'step', 'steps',
+      'pothole', 'hole', 'pit',
+      'barrier', 'construction',
+      'curb', 'uneven ground',
+      'chair', 'table', 'bench',
+      'car', 'motorcycle', 'bicycle', 'vehicle'
+    };
+
+    final priorityObstacles = _obstacles
+        .where((o) => priorityLabels.contains(o.label.toLowerCase().trim()))
+        .toList();
+
+    final actionable = priorityObstacles.isNotEmpty
+        ? priorityObstacles
+        : _obstacles.where((o) => !const {'floor', 'ground', 'plant', 'tree', 'person', 'people'}.contains(o.label.toLowerCase().trim())).toList();
+
+    if (actionable.isEmpty) {
+      return '🟢 พื้นทางเดินราบรื่น (ปลอดภัย)';
     }
 
-    if (closest == null || _simulatedProximity < 0.15) {
-      return '🟢 พื้นผิวราบรื่น / ทางสะดวก';
-    }
+    final uniqueNames = actionable
+        .map((obs) => _getThaiLabel(obs.label))
+        .toSet()
+        .toList();
 
-    final label = closest.label.toLowerCase();
-    final thaiLabel = _getThaiLabel(closest.label);
+    final namesSummary = uniqueNames.join(', ');
+    final dangerPrefix = distM <= 1.0 ? '🚨 อันตรายระยะประชิด!' : (distM <= 2.0 ? '⚠️ สังเกตพบ' : 'ℹ️ ตรวจพบ');
 
-    if (label == 'pothole' || label == 'stairs' || label == 'step' || label == 'crack') {
-      return '⚠️ ตรวจพบ: อุปสรรคบนพื้น ($thaiLabel) ข้างหน้า!';
-    } else if (label == 'pole' || label == 'person' || label == 'door' || label == 'wall') {
-      return '⚠️ ตรวจพบ: สิ่งกีดขวาง ($thaiLabel) ด้านหน้า!';
-    } else {
-      return '⚠️ ตรวจพบ: $thaiLabel ข้างหน้า!';
-    }
+    return '$dangerPrefix $namesSummary ด้านหน้า (ห่าง $distStr)';
   }
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    _keyboardFocusNode.dispose();
     _hapticTimer?.cancel();
     _boxAnimController.dispose();
     _pulseController.dispose();
     _cameraController?.dispose();
+    _visionTrigger.dispose();
     super.dispose();
   }
 
   Future<void> _captureAndAnalyze(BuildContext context) async {
     final acc = ref.read(accessibilityProvider);
     
-    // 1. Get webcam frame from HTML5 video element (or use fallback)
+    // 1. Get webcam frame from HTML5 video element or native camera
     String? base64Frame = captureFrame();
     
-    // Fallback base64 representing a single pixel if running outside simulator or denied webcam
     if (base64Frame == null || base64Frame.isEmpty) {
-      base64Frame = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==";
+      if (_cameraController != null && _cameraController!.value.isInitialized) {
+        try {
+          final xFile = await _cameraController!.takePicture();
+          final bytes = await xFile.readAsBytes();
+          base64Frame = base64Encode(bytes);
+        } catch (_) {}
+      }
+    }
+    
+    if (base64Frame == null || base64Frame.isEmpty) {
+      announceSpeech('ไม่สามารถบันทึกภาพจากกล้องได้ กรุณาตรวจสอบการเข้าถึงกล้อง', acc.voiceEnabled);
+      return;
     }
     
     // 2. Show loading dialog
@@ -463,7 +691,7 @@ class _VisionAssistScreenState extends ConsumerState<VisionAssistScreen> with Ti
             ),
             title: Row(
               children: [
-                Icon(Icons.psychology_rounded, color: acc.highContrast ? Colors.white : Colors.blue),
+                Icon(Icons.psychology_rounded, color: acc.highContrast ? Colors.white : AppColors.getPrimary(acc.colorBlind)),
                 const SizedBox(width: 8),
                 Text('คำอธิบายจาก AI Vision', style: TextStyle(color: acc.highContrast ? Colors.white : Colors.black, fontWeight: FontWeight.bold, fontSize: 18 * acc.fontScale)),
               ],
@@ -475,7 +703,7 @@ class _VisionAssistScreenState extends ConsumerState<VisionAssistScreen> with Ti
             actions: [
               TextButton(
                 onPressed: () => Navigator.pop(ctx),
-                child: Text('ตกลง', style: TextStyle(color: acc.highContrast ? Colors.white : Colors.blue[800], fontSize: 16 * acc.fontScale)),
+                child: Text('ตกลง', style: TextStyle(color: acc.highContrast ? Colors.white : AppColors.getPrimary(acc.colorBlind), fontSize: 16 * acc.fontScale)),
               ),
             ],
           ),
@@ -511,7 +739,7 @@ class _VisionAssistScreenState extends ConsumerState<VisionAssistScreen> with Ti
             actions: [
               TextButton(
                 onPressed: () => Navigator.pop(ctx),
-                child: Text('ตกลง', style: TextStyle(color: acc.highContrast ? Colors.white : Colors.blue[800], fontSize: 16 * acc.fontScale)),
+                child: Text('ตกลง', style: TextStyle(color: acc.highContrast ? Colors.white : AppColors.getPrimary(acc.colorBlind), fontSize: 16 * acc.fontScale)),
               ),
             ],
           ),
@@ -524,6 +752,7 @@ class _VisionAssistScreenState extends ConsumerState<VisionAssistScreen> with Ti
   Widget build(BuildContext context) {
     final acc = ref.watch(accessibilityProvider);
     final isHighContrast = acc.highContrast;
+    final primaryColor = AppColors.getPrimary(acc.colorBlind, isHighContrast: isHighContrast);
     
     return Scaffold(
       appBar: AppBar(
@@ -531,7 +760,7 @@ class _VisionAssistScreenState extends ConsumerState<VisionAssistScreen> with Ti
           'ตรวจจับสิ่งกีดขวางแบบเรียลไทม์',
           style: TextStyle(fontSize: 20 * acc.fontScale, fontWeight: FontWeight.bold),
         ),
-        backgroundColor: isHighContrast ? Colors.black : Colors.blue[900],
+        backgroundColor: primaryColor,
         foregroundColor: Colors.white,
         actions: [
           IconButton(
@@ -612,27 +841,57 @@ class _VisionAssistScreenState extends ConsumerState<VisionAssistScreen> with Ti
                   Positioned(
                     top: 16,
                     left: 16,
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-                      decoration: BoxDecoration(
-                        color: isHighContrast ? Colors.black : Colors.blue[900]?.withOpacity(0.8),
-                        border: isHighContrast ? Border.all(color: Colors.white, width: 1.5) : null,
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                      child: Row(
-                        children: [
-                          const Icon(Icons.lens, color: Colors.red, size: 12),
-                          const SizedBox(width: 8),
-                          Text(
-                            'กล้อง AI เปิดใช้งานสแกนอยู่',
-                            style: TextStyle(
-                              color: Colors.white,
-                              fontSize: 14 * acc.fontScale,
-                              fontWeight: FontWeight.bold,
-                            ),
+                    right: 16,
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                          decoration: BoxDecoration(
+                            color: isHighContrast ? Colors.black : Colors.green[900]?.withOpacity(0.85),
+                            border: Border.all(color: Colors.lightGreenAccent, width: 1.2),
+                            borderRadius: BorderRadius.circular(10),
                           ),
-                        ],
-                      ),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              const Icon(Icons.bolt_rounded, color: Colors.yellowAccent, size: 14),
+                              const SizedBox(width: 4),
+                              Text(
+                                'L1: YOLO Edge',
+                                style: TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 11 * acc.fontScale,
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                          decoration: BoxDecoration(
+                            color: isHighContrast ? Colors.black : Colors.indigo[900]?.withOpacity(0.85),
+                            border: Border.all(color: Colors.lightBlueAccent, width: 1.2),
+                            borderRadius: BorderRadius.circular(10),
+                          ),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              const Icon(Icons.cloud_done_rounded, color: Colors.lightBlueAccent, size: 14),
+                              const SizedBox(width: 4),
+                              Text(
+                                'L2: Vision AI',
+                                style: TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 11 * acc.fontScale,
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
                     ),
                   ),
                   
@@ -641,25 +900,87 @@ class _VisionAssistScreenState extends ConsumerState<VisionAssistScreen> with Ti
                     left: 16,
                     right: 16,
                     bottom: 80,
-                    child: Card(
-                      color: isHighContrast ? Colors.black : Colors.red[900]?.withOpacity(0.9),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(12),
-                        side: isHighContrast ? const BorderSide(color: Colors.white, width: 2) : BorderSide.none,
-                      ),
-                      child: Padding(
-                        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-                        child: Text(
-                          _getWarningText(),
-                          textAlign: TextAlign.center,
-                          style: TextStyle(
-                            fontSize: 18 * acc.fontScale,
-                            fontWeight: FontWeight.bold,
-                            color: Colors.white,
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        // Confidence Score Badge (ข้อ 10 ของอาจารย์)
+                        if (_obstacles.isNotEmpty && _obstacles.any((o) => _isActionableObstacleOrFacility(o.label)))
+                          Container(
+                            width: double.infinity,
+                            margin: const EdgeInsets.only(bottom: 6),
+                            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                            decoration: BoxDecoration(
+                              color: isHighContrast ? Colors.black : Colors.blueGrey[900]?.withOpacity(0.85),
+                              borderRadius: BorderRadius.circular(8),
+                              border: isHighContrast ? Border.all(color: Colors.white54) : null,
+                            ),
+                            child: Row(
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              children: [
+                                const Icon(Icons.verified_rounded, color: Colors.lightBlueAccent, size: 16),
+                                const SizedBox(width: 6),
+                                Text(
+                                  'Confidence: ${(_obstacles.where((o) => _isActionableObstacleOrFacility(o.label)).fold<double>(0.0, (max, o) => o.score > max ? o.score : max) * 100).toStringAsFixed(0)}%  |  ระยะ: ${_formatDistanceText(_getEstimatedDistanceMeters(_simulatedProximity))}',
+                                  style: TextStyle(
+                                    color: Colors.white,
+                                    fontSize: 12 * acc.fontScale,
+                                    fontWeight: FontWeight.w600,
+                                  ),
+                                ),
+                              ],
+                            ),
                           ),
-                        ),
+
+                          // Quick Button: Save Barrier to Central GIS Map Database
+                          if (_obstacles.isNotEmpty && _isScanning)
+                            Padding(
+                              padding: const EdgeInsets.only(bottom: 6),
+                              child: ElevatedButton.icon(
+                                onPressed: _isSavingBarrier ? null : () => _recordBarrierToGis(isManual: true),
+                                icon: _isSavingBarrier
+                                    ? const SizedBox(width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                                    : const Icon(Icons.add_location_alt_rounded, color: Colors.amberAccent, size: 16),
+                                label: Text(
+                                  _isSavingBarrier ? 'กำลังบันทึกพิกัด...' : '📌 บันทึกอุปสรรคนี้ลงแผนที่ส่วนกลาง',
+                                  style: TextStyle(
+                                    fontSize: 12 * acc.fontScale,
+                                    fontWeight: FontWeight.bold,
+                                    color: Colors.white,
+                                  ),
+                                ),
+                                style: ElevatedButton.styleFrom(
+                                  backgroundColor: Colors.black87,
+                                  foregroundColor: Colors.white,
+                                  side: const BorderSide(color: Colors.amberAccent, width: 1.2),
+                                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+                                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+                                  elevation: 4,
+                                ),
+                              ),
+                            ),
+
+                          // Warning Card
+                          Card(
+                            color: isHighContrast ? Colors.black : Colors.red[900]?.withOpacity(0.9),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(12),
+                              side: isHighContrast ? const BorderSide(color: Colors.white, width: 2) : BorderSide.none,
+                            ),
+                            child: Padding(
+                              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+                              child: Text(
+                                _getWarningText(),
+                                textAlign: TextAlign.center,
+                                style: TextStyle(
+                                  fontSize: 18 * acc.fontScale,
+                                  fontWeight: FontWeight.bold,
+                                  color: Colors.white,
+                                ),
+                              ),
+                            ),
+                          ),
+                        ],
                       ),
-                    ),
                   ),
                   
                 if (_isScanning)
@@ -696,11 +1017,16 @@ class _VisionAssistScreenState extends ConsumerState<VisionAssistScreen> with Ti
         ],
       ),
       floatingActionButton: FloatingActionButton.large(
+        heroTag: 'main_vision_scan_fab',
         onPressed: _toggleScan,
-        backgroundColor: _isScanning ? Colors.red : (isHighContrast ? Colors.white : Colors.blue),
+        backgroundColor: _isScanning ? Colors.red : (isHighContrast ? Colors.white : primaryColor),
         foregroundColor: _isScanning ? Colors.white : (isHighContrast ? Colors.black : Colors.white),
         tooltip: _isScanning ? 'หยุดสแกน' : 'เริ่มสแกน',
-        child: Icon(_isScanning ? Icons.stop : Icons.search, size: 36),
+        elevation: 10,
+        child: Icon(
+          _isScanning ? Icons.stop_rounded : Icons.search_rounded,
+          size: 48,
+        ),
       ),
       floatingActionButtonLocation: FloatingActionButtonLocation.centerFloat,
     );
@@ -721,61 +1047,148 @@ class BoundingBoxPainter extends CustomPainter {
   });
 
   String _translateLabel(String label) {
-    switch (label.toLowerCase()) {
+    switch (label.toLowerCase().trim()) {
+      // Structural
+      case 'pillar':
+      case 'column':
+      case 'pole':
+      case 'post':
+        return 'เสา';
+      case 'wall':
+        return 'ผนัง/กำแพง';
+      case 'ceiling':
+        return 'เพดาน';
+      case 'beam':
+        return 'คาน';
+      case 'door':
+        return 'ประตู';
+      case 'window':
+        return 'หน้าต่าง';
+
+      // Obstacles & Walking Hazards
+      case 'stairs':
+      case 'step':
+      case 'steps':
+        return 'บันได';
+      case 'pothole':
+      case 'hole':
+      case 'pit':
+        return 'หลุมบนพื้น';
+      case 'crack':
+        return 'รอยแตกบนทางเดิน';
+      case 'curb':
+        return 'ขอบทางเท้า';
+      case 'barrier':
+      case 'construction':
+        return 'แผงกั้น/เขตก่อสร้าง';
+      case 'water_puddle':
+      case 'puddle':
+        return 'แอ่งน้ำขัง';
+
+      // Electrical & Wall Fixtures
+      case 'fan':
+      case 'wall fan':
+      case 'electric fan':
+      case 'ceiling fan':
+        return 'พัดลม';
+      case 'socket':
+      case 'plug':
+      case 'outlet':
+        return 'ปลั๊กไฟ';
+      case 'switch':
+        return 'สวิตช์ไฟ';
+      case 'wire':
+      case 'cable':
+        return 'สายไฟ';
+      case 'ac':
+      case 'air conditioner':
+        return 'เครื่องปรับอากาศ';
+
+      // Furniture & Common Objects
+      case 'chair':
+        return 'เก้าอี้';
+      case 'table':
+      case 'dining table':
+      case 'desk':
+        return 'โต๊ะ';
+      case 'bench':
+        return 'ม้านั่ง';
+      case 'trash_can':
+      case 'bin':
+        return 'ถังขยะ';
+      case 'bottle':
+        return 'ขวดน้ำ';
+      case 'cup':
+      case 'mug':
+        return 'แก้วน้ำ';
+      case 'sign':
+        return 'ป้ายบอกทาง';
+
+      // Accessibility Facilities
+      case 'tactile_paving':
+      case 'braille_block':
+        return 'เบรลล์บล็อก (ทางคนตาบอด)';
+      case 'ramp':
+      case 'wheelchair_ramp':
+        return 'ทางลาดชัน';
+      case 'elevator':
+      case 'lift':
+        return 'ลิฟต์';
+      case 'handrail':
+        return 'ราวจับ';
+      case 'crosswalk':
+        return 'ทางม้าลาย';
+
+      // Dynamic / Living Objects
       case 'person':
-        return 'คน';
+      case 'people':
+      case 'pedestrian':
+        return 'คนเดินเท้า';
       case 'car':
         return 'รถยนต์';
       case 'motorcycle':
         return 'รถจักรยานยนต์';
       case 'bicycle':
         return 'รถจักรยาน';
-      case 'elevator':
-      case 'lift':
-        return 'ลิฟต์';
-      case 'crosswalk':
-        return 'ทางม้าลาย';
-      case 'pothole':
-        return 'หลุม';
-      case 'stairs':
-        return 'บันได';
-      case 'ramp':
-        return 'ทางลาดชัน';
-      case 'pole':
-        return 'เสาไฟฟ้า';
-      case 'door':
-        return 'ประตู';
-      case 'chair':
-        return 'เก้าอี้';
-      case 'table':
-      case 'dining table':
-        return 'โต๊ะ';
-      case 'bottle':
-        return 'ขวดน้ำ';
-      case 'cup':
-      case 'mug':
-        return 'แก้วน้ำ';
+      case 'dog':
+      case 'cat':
+      case 'animal':
+        return 'สัตว์';
+      case 'tree':
+      case 'plant':
+        return 'ต้นไม้';
+
       default:
         return label;
     }
   }
 
   Color _getColorForLabel(String label) {
-    final lower = label.toLowerCase();
-    if (lower == 'person' || lower == 'car' || lower == 'dog' || lower == 'pothole' || lower == 'pole') {
+    final lower = label.toLowerCase().trim();
+    const redLabels = {
+      'pillar', 'column', 'pole', 'post', 'pothole', 'hole', 'pit',
+      'stairs', 'step', 'steps', 'crack', 'barrier', 'construction',
+      'wire', 'cable', 'car', 'motorcycle', 'bicycle'
+    };
+    const greenLabels = {
+      'tactile_paving', 'braille_block', 'ramp', 'wheelchair_ramp',
+      'elevator', 'lift', 'handrail', 'crosswalk', 'sign'
+    };
+
+    if (redLabels.contains(lower)) {
       return Colors.red;
-    } else if (lower == 'chair' || lower == 'table' || lower == 'bottle' || lower == 'ramp' || lower == 'barrier' || lower == 'elevator' || lower == 'door') {
-      return Colors.orange;
-    } else {
+    } else if (greenLabels.contains(lower)) {
       return Colors.green;
+    } else {
+      return Colors.orange;
     }
   }
 
   @override
   void paint(Canvas canvas, Size size) {
-    if (proximity < 0.15) return;
+    if (obstacles.isEmpty) return;
 
-    // Draw real-time YOLO/COCO/Simulated detected objects!
+    // Draw real-time detected objects!
     for (final ob in obstacles) {
       final rect = Rect.fromLTWH(
         ob.x * size.width,

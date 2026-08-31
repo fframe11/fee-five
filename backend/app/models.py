@@ -57,7 +57,7 @@ class AccessibilityPoint(Base):
     type = Column(String(50), nullable=False)  # elevator, ramp, crossing
     name = Column(String(100), nullable=False)
     # PostGIS Point: Geometry type, SRID 4326 (WGS 84 GPS coordinates)
-    geom = Column(Geometry(geometry_type="POINT", srid=4326), nullable=False)
+    geom = Column(Geometry(geometry_type="POINT", srid=4326, spatial_index=False), nullable=False)
     status = Column(String(50), default="available", nullable=False)  # available, unavailable
     accessibility_level = Column(String(50), nullable=True)
     updated_at = Column(DateTime, default=datetime.datetime.utcnow, onupdate=datetime.datetime.utcnow, nullable=False)
@@ -68,7 +68,7 @@ class Barrier(Base):
     id = Column(Integer, primary_key=True, index=True)
     type = Column(String(50), nullable=False)  # broken_sidewalk, flooding, obstacle
     # PostGIS Point: Geometry type, SRID 4326
-    geom = Column(Geometry(geometry_type="POINT", srid=4326), nullable=False)
+    geom = Column(Geometry(geometry_type="POINT", srid=4326, spatial_index=False), nullable=False)
     severity = Column(String(50), default="medium", nullable=False)  # low, medium, high
     status = Column(String(50), default="active", nullable=False)  # active, cleared
     reported_at = Column(DateTime, default=datetime.datetime.utcnow, nullable=False)
@@ -80,9 +80,9 @@ class NavigationSession(Base):
     id = Column(Integer, primary_key=True, index=True)
     user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
     # PostGIS geometries
-    origin_geom = Column(Geometry(geometry_type="POINT", srid=4326), nullable=False)
-    destination_geom = Column(Geometry(geometry_type="POINT", srid=4326), nullable=False)
-    route_geometry = Column(Geometry(geometry_type="LINESTRING", srid=4326), nullable=True)
+    origin_geom = Column(Geometry(geometry_type="POINT", srid=4326, spatial_index=False), nullable=False)
+    destination_geom = Column(Geometry(geometry_type="POINT", srid=4326, spatial_index=False), nullable=False)
+    route_geometry = Column(Geometry(geometry_type="LINESTRING", srid=4326, spatial_index=False), nullable=True)
     started_at = Column(DateTime, default=datetime.datetime.utcnow, nullable=False)
     ended_at = Column(DateTime, nullable=True)
     status = Column(String(50), default="navigating", nullable=False)  # navigating, completed, canceled
@@ -98,7 +98,7 @@ class EmergencyEvent(Base):
     event_type = Column(String(50), default="SOS", nullable=False)
     trigger_method = Column(String(50), nullable=False)  # manual, gesture
     # PostGIS Point
-    geom = Column(Geometry(geometry_type="POINT", srid=4326), nullable=False)
+    geom = Column(Geometry(geometry_type="POINT", srid=4326, spatial_index=False), nullable=False)
     accuracy = Column(Float, nullable=True)
     status = Column(String(50), default="active", nullable=False)  # active, resolved
     created_at = Column(DateTime, default=datetime.datetime.utcnow, nullable=False)
@@ -122,7 +122,9 @@ class GTFSStop(Base):
 
     stop_id = Column(String(50), primary_key=True)
     stop_name = Column(String(255), nullable=False)
-    geom = Column(Geometry(geometry_type="POINT", srid=4326), nullable=False)
+    stop_lat = Column(Float, nullable=True)
+    stop_lon = Column(Float, nullable=True)
+    geom = Column(Geometry(geometry_type="POINT", srid=4326, spatial_index=False), nullable=True)
 
 
 class GTFSTrip(Base):
@@ -149,7 +151,7 @@ class GTFSVehiclePosition(Base):
 
     vehicle_id = Column(String(50), primary_key=True)
     trip_id = Column(String(50), ForeignKey("gtfs_trips.trip_id", ondelete="SET NULL"), nullable=True)
-    geom = Column(Geometry(geometry_type="POINT", srid=4326), nullable=False)
+    geom = Column(Geometry(geometry_type="POINT", srid=4326, spatial_index=False), nullable=False)
     current_stop_id = Column(String(50), ForeignKey("gtfs_stops.stop_id", ondelete="SET NULL"), nullable=True)
     current_status = Column(String(50), nullable=True)  # IN_TRANSIT_TO, STOPPED_AT
     delay_seconds = Column(Integer, nullable=False, default=0)

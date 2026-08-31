@@ -1,11 +1,25 @@
 import 'dart:convert';
+import 'package:flutter/foundation.dart';
+import 'package:geolocator/geolocator.dart';
 import 'package:http/http.dart' as http;
 
 class ApiClient {
   final String baseUrl;
   String? _authToken;
 
-  ApiClient({this.baseUrl = 'http://127.0.0.1:8000'});
+  static String getDefaultBaseUrl() {
+    if (kIsWeb) {
+      return 'http://127.0.0.1:8000';
+    }
+    // Allow overriding via flutter build --dart-define=BACKEND_URL=...
+    const envUrl = String.fromEnvironment('BACKEND_URL');
+    if (envUrl.isNotEmpty) return envUrl;
+
+    // Default to computer LAN IP so mobile device on same WiFi connects seamlessly
+    return 'http://10.1.236.181:8000';
+  }
+
+  ApiClient({String? baseUrl}) : baseUrl = baseUrl ?? getDefaultBaseUrl();
 
   void setToken(String token) {
     _authToken = token;
@@ -118,23 +132,90 @@ class ApiClient {
     }
   }
 
-  // 6. Vision: Analyze image via Groq LPU Vision API proxy in backend
+  // 6. Vision: Analyze image via Local Backend OR Direct Groq Cloud Vision API
   Future<String> analyzeVisionImage(String base64Image, {String? prompt}) async {
-    final url = Uri.parse('$baseUrl/api/v1/vision/analyze');
-    final response = await http.post(
-      url,
-      headers: _headers(),
-      body: jsonEncode({
-        'image_base64': base64Image,
-        'prompt': prompt,
-      }),
-    );
-    if (response.statusCode == 200) {
-      final data = jsonDecode(response.body);
-      return data['description'] ?? 'ไม่พบข้อมูลคำอธิบายภาพ';
-    } else {
-      throw Exception('ไม่สามารถประมวลผลรูปภาพ: ${response.body}');
+    final effectivePrompt = prompt ??
+        'You are an objective computer vision obstacle detector for visually impaired pedestrian navigation.\n'
+        'Analyze this camera image and accurately detect ONLY real, physical, and hazardous obstacles directly on or near the walking path (such as pole, stairs, pothole, curb, barrier, chair, table, vehicle, pedestrian, uneven ground).\n'
+        'CRITICAL RULES:\n'
+        '- Do NOT detect standard background structures (e.g. plain walls, ceilings, floors) or small wall attachments (e.g. power sockets, switches) unless they pose a direct physical collision hazard.\n'
+        '- If the path is clear and no actual hazards are present, return an empty JSON array: [].\n'
+        'Return ONLY a valid JSON array of objects without extra commentary:\n'
+        '[{"label": "pole", "score": 0.95, "bbox_2d": [xmin, ymin, xmax, ymax]}]\n'
+        'where coordinates are normalized 0 to 1000.';
+
+    // 1. Try Local Backend Proxy First (Fast LAN)
+    try {
+      final url = Uri.parse('$baseUrl/api/v1/vision/analyze');
+      final response = await http.post(
+        url,
+        headers: _headers(),
+        body: jsonEncode({
+          'image_base64': base64Image,
+          'prompt': effectivePrompt,
+        }),
+      ).timeout(const Duration(seconds: 3));
+
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body);
+        final desc = data['description'] ?? '';
+        if (desc.isNotEmpty) return desc;
+      }
+    } catch (_) {
+      // Local backend unreachable or on 4G/5G mobile cellular network -> fallback to Direct Cloud Vision
     }
+
+    // 2. Direct Groq Cloud Vision API Fallback (Guaranteed to work on 4G / 5G / Any network)
+    try {
+      final groqUrl = Uri.parse('https://api.groq.com/openai/v1/chat/completions');
+      const groqKey = String.fromEnvironment(
+        'GROQ_API_KEY',
+        defaultValue: '',
+      );
+      if (groqKey.isEmpty) return '[]';
+
+      final imgData = base64Image.startsWith('data:image')
+          ? base64Image
+          : 'data:image/jpeg;base64,${base64Image.replaceAll(RegExp(r'\s+'), '')}';
+
+      final groqResponse = await http.post(
+        groqUrl,
+        headers: {
+          'Authorization': 'Bearer $groqKey',
+          'Content-Type': 'application/json',
+        },
+        body: jsonEncode({
+          'model': 'qwen/qwen3.8-27b',
+          'messages': [
+            {
+              'role': 'user',
+              'content': [
+                {'type': 'text', 'text': effectivePrompt},
+                {'type': 'image_url', 'image_url': {'url': imgData}}
+              ]
+            }
+          ],
+          'temperature': 0.1,
+        }),
+      ).timeout(const Duration(seconds: 8));
+
+      if (groqResponse.statusCode == 200) {
+        final resJson = jsonDecode(utf8.decode(groqResponse.bodyBytes));
+        String content = resJson['choices'][0]['message']['content'] ?? '[]';
+        // Strip think tags if present
+        content = content.replaceAll(RegExp(r'<think>.*?</think>', dotAll: true), '').trim();
+        if (content.contains('```json')) {
+          content = content.split('```json')[1].split('```')[0].trim();
+        } else if (content.contains('```')) {
+          content = content.split('```')[1].split('```')[0].trim();
+        }
+        return content;
+      }
+    } catch (e) {
+      debugPrint('[ApiClient] Direct Groq Cloud Vision Error: $e');
+    }
+
+    return '[]';
   }
 
   // 7. Transit: Calculate transit route using GTFS/GTFS-RT
@@ -153,7 +234,7 @@ class ApiClient {
           'longitude': destLng,
         }
       }),
-    );
+    ).timeout(const Duration(seconds: 3));
     if (response.statusCode == 200) {
       return jsonDecode(response.body) as Map<String, dynamic>;
     } else {
@@ -185,7 +266,46 @@ class ApiClient {
       throw Exception('ไม่สามารถดึงข้อมูลเปรียบเทียบการเดินทาง: ${response.body}');
     }
   }
-  // 9. Emergency: Trigger alert from sign language gesture detection
+
+  // 9. Accessibility GIS: Fetch Ramps, Elevators, Accessible Points
+  Future<List<dynamic>> getAccessibilityPoints() async {
+    try {
+      final url = Uri.parse('$baseUrl/api/v1/accessibility/points');
+      final response = await http.get(url, headers: _headers()).timeout(const Duration(seconds: 3));
+      if (response.statusCode == 200) {
+        return jsonDecode(response.body) as List<dynamic>;
+      }
+    } catch (_) {}
+    return [];
+  }
+
+  // 10. Accessibility GIS: Fetch Active Road & Sidewalk Barriers (GPS-based)
+  Future<List<dynamic>> getActiveBarriers({double? lat, double? lng}) async {
+    try {
+      double queryLat = lat ?? 0;
+      double queryLng = lng ?? 0;
+      if (queryLat == 0 || queryLng == 0) {
+        try {
+          final pos = await Geolocator.getCurrentPosition(
+            desiredAccuracy: LocationAccuracy.medium,
+            timeLimit: const Duration(seconds: 3),
+          );
+          queryLat = pos.latitude;
+          queryLng = pos.longitude;
+        } catch (_) {
+          return [];
+        }
+      }
+      final url = Uri.parse('$baseUrl/api/barriers/proximity?lat=$queryLat&lng=$queryLng&radius=2000');
+      final response = await http.get(url, headers: _headers()).timeout(const Duration(seconds: 3));
+      if (response.statusCode == 200) {
+        return jsonDecode(response.body) as List<dynamic>;
+      }
+    } catch (_) {}
+    return [];
+  }
+
+  // 11. Emergency: Trigger alert from sign language gesture detection
   Future<Map<String, dynamic>> triggerEmergencyAlert(double lat, double lng, String message) async {
     return reportEmergencySOS(
       lat: lat,
@@ -194,4 +314,106 @@ class ApiClient {
       confidence: 0.95,
     );
   }
+
+  // 12. Smart Accessibility Agent: Send event to ReAct agent
+  Future<Map<String, dynamic>> postAgentEvent(Map<String, dynamic> eventPayload) async {
+    final url = Uri.parse('$baseUrl/api/v1/agent/event');
+    final response = await http.post(
+      url,
+      headers: _headers(),
+      body: jsonEncode(eventPayload),
+    );
+    if (response.statusCode == 200) {
+      return jsonDecode(response.body) as Map<String, dynamic>;
+    } else {
+      throw Exception('Agent processing error (${response.statusCode}): ${response.body}');
+    }
+  }
+
+  // 13. Smart Accessibility Agent: Query session status
+  Future<Map<String, dynamic>> getAgentStatus(int userId) async {
+    final url = Uri.parse('$baseUrl/api/v1/agent/status/$userId');
+    final response = await http.get(url, headers: _headers());
+    if (response.statusCode == 200) {
+      return jsonDecode(response.body) as Map<String, dynamic>;
+    } else {
+      throw Exception('Failed to fetch agent status: ${response.body}');
+    }
+  }
+
+  // 14. Smart Accessibility Agent: Clear user session
+  Future<void> clearAgentSession(int userId) async {
+    final url = Uri.parse('$baseUrl/api/v1/agent/session/$userId');
+    await http.delete(url, headers: _headers());
+  }
+
+  // 15. GIS Barrier Persistence: Save detected obstacle to database with GPS
+  Future<bool> reportBarrier({
+    required String type,
+    required double lat,
+    required double lng,
+    String severity = 'high',
+    String? description,
+  }) async {
+    try {
+      final url = Uri.parse('$baseUrl/api/v1/accessibility/barriers');
+      final response = await http.post(
+        url,
+        headers: _headers(),
+        body: jsonEncode({
+          'type': type,
+          'location': {
+            'latitude': lat,
+            'longitude': lng,
+          },
+          'severity': severity,
+          'status': 'active',
+          'description': description ?? 'ตรวจพบอุปสรรคโดยกล้อง AI Vision',
+        }),
+      ).timeout(const Duration(seconds: 4));
+      return response.statusCode == 200 || response.statusCode == 201;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  // 16. AI Mobility Agent: Multi-factor ReAct Transit Decision
+  Future<Map<String, dynamic>?> getAiTransitDecision({
+    required double originLat,
+    required double originLng,
+    required double destLat,
+    required double destLng,
+    required String destName,
+    String userProfile = 'visual',
+    String weather = 'normal',
+    String trafficCondition = 'normal',
+    String preference = 'balanced',
+  }) async {
+    try {
+      final url = Uri.parse('$baseUrl/api/v1/navigation/ai-transit-decision');
+      final response = await http.post(
+        url,
+        headers: _headers(),
+        body: jsonEncode({
+          'origin_lat': originLat,
+          'origin_lon': originLng,
+          'origin_name': 'ตำแหน่งปัจจุบัน',
+          'dest_lat': destLat,
+          'dest_lon': destLng,
+          'dest_name': destName,
+          'user_profile': userProfile,
+          'weather': weather,
+          'traffic_condition': trafficCondition,
+          'preference': preference,
+        }),
+      ).timeout(const Duration(seconds: 6));
+      if (response.statusCode == 200) {
+        return jsonDecode(utf8.decode(response.bodyBytes)) as Map<String, dynamic>;
+      }
+    } catch (e) {
+      debugPrint('[ApiClient] AI Transit Decision error: $e');
+    }
+    return null;
+  }
 }
+

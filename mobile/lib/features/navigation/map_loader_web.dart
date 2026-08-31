@@ -17,7 +17,7 @@ void registerView() {
         ..style.border = 'none'
         ..style.width = '100%'
         ..style.height = '100%'
-        ..style.pointerEvents = 'none';
+        ..style.pointerEvents = 'auto'; // Allows dragging, panning, zooming, and clicking markers
     },
   );
 }
@@ -44,13 +44,47 @@ void postDrawRoute({
   ]);
 }
 
+void postSetUserLocation({
+  required double latitude,
+  required double longitude,
+  String label = '📍 ตำแหน่งปัจจุบันของคุณ',
+}) {
+  js.context.callMethod('eval', [
+    "var iframes = document.getElementsByTagName('iframe');"
+    "for (var i = 0; i < iframes.length; i++) {"
+    "  if (iframes[i].src.indexOf('map.html') !== -1) {"
+    "    iframes[i].contentWindow.postMessage({"
+    "      type: 'SET_USER_LOCATION',"
+    "      latitude: $latitude,"
+    "      longitude: $longitude,"
+    "      label: '$label'"
+    "    }, '*');"
+    "  }"
+    "}"
+  ]);
+}
+
+void listenDestinationSelection(void Function(String stopName) callback) {
+  html.window.onMessage.listen((event) {
+    try {
+      final data = event.data;
+      if (data is Map && data['type'] == 'SELECT_DESTINATION') {
+        final stopName = data['stop_name'] as String?;
+        if (stopName != null) {
+          callback(stopName);
+        }
+      }
+    } catch (_) {}
+  });
+}
+
 void setMapIframeClickable(bool clickable) {
   try {
     js.context.callMethod('eval', [
       "var iframes = document.getElementsByTagName('iframe');"
       "for (var i = 0; i < iframes.length; i++) {"
       "  if (iframes[i].src.indexOf('map.html') !== -1) {"
-      "    iframes[i].style.pointerEvents = 'none';"
+      "    iframes[i].style.pointerEvents = '${clickable ? 'auto' : 'none'}';"
       "  }"
       "}"
     ]);

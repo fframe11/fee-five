@@ -19,6 +19,22 @@ void sendDrawRouteMessage({
   );
 }
 
+void sendUserLocationMessage({
+  required double latitude,
+  required double longitude,
+  String label = '📍 ตำแหน่งปัจจุบันของคุณ',
+}) {
+  postSetUserLocation(
+    latitude: latitude,
+    longitude: longitude,
+    label: label,
+  );
+}
+
+void onMapDestinationSelected(void Function(String stopName) callback) {
+  listenDestinationSelection(callback);
+}
+
 void toggleMapIframeClickable(bool clickable) {
   setMapIframeClickable(clickable);
 }

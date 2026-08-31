@@ -13,6 +13,10 @@ backend/venv/
 backend/.venv/
 .pytest_cache/
 
+# Large Datasets & Training Runs
+datasets/
+runs/
+
 # Environment and IDEs
 .env
 .idea/
@@ -20,3 +24,4 @@ backend/.venv/
 *.tmp
 *.log
 .DS_Store
+

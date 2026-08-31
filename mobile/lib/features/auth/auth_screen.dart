@@ -93,27 +93,29 @@ class _AuthScreenState extends ConsumerState<AuthScreen> {
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
                 Semantics(
-                  label: 'โลโก้แอปพลิเคชัน',
+                  label: 'โลโก้แอปพลิเคชัน TAM',
                   child: Text(
-                    'FeeFive',
+                    'TAM',
                     textAlign: TextAlign.center,
                     style: TextStyle(
-                      fontSize: 32 * acc.fontScale,
+                      fontSize: 36 * acc.fontScale,
                       fontWeight: FontWeight.bold,
                       color: isHighContrast ? Colors.white : Theme.of(context).colorScheme.primary,
-                      letterSpacing: 1.5,
+                      letterSpacing: 2.0,
                     ),
                   ),
                 ),
-                const SizedBox(height: 8.0),
+                const SizedBox(height: 6.0),
                 Text(
-                  'ระบบนำทางและความช่วยเหลือผู้พิการ',
+                  'Transformation Accessibility Mass',
                   textAlign: TextAlign.center,
                   style: TextStyle(
                     fontSize: 15 * acc.fontScale,
-                    color: isHighContrast ? Colors.white70 : Colors.grey[600],
+                    fontWeight: FontWeight.w600,
+                    color: isHighContrast ? Colors.white70 : Colors.grey[700],
                   ),
                 ),
+
                 const SizedBox(height: 32.0),
                 Semantics(
                   label: 'ช่องกรอกอีเมล',

@@ -14,14 +14,14 @@ class RouteSchema(BaseModel):
 class UserBase(BaseModel):
     name: str = Field(..., min_length=2, max_length=100)
     email: EmailStr
-    accessibility_mode: str = Field(..., description="Mode must be 'visual', 'wheelchair', or 'speech_hearing'")
+    accessibility_mode: str = Field(default="visual", description="Mode: 'visual'")
 
 class UserCreate(UserBase):
     password: str = Field(..., min_length=6, max_length=100)
 
 class UserUpdate(BaseModel):
     name: Optional[str] = Field(None, min_length=2, max_length=100)
-    accessibility_mode: Optional[str] = Field(None, description="Mode: 'visual', 'wheelchair', or 'speech_hearing'")
+    accessibility_mode: Optional[str] = Field(default="visual", description="Mode: 'visual'")
 
 class UserResponse(UserBase):
     id: int

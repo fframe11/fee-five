@@ -18,10 +18,34 @@ dependencies:
   url_launcher: ^6.2.0
   intl: ^0.19.0
   pointer_interceptor: ^0.10.1
+  tflite_flutter: ^0.12.0
+  flutter_foreground_task: ^11.0.1
+  flutter_local_notifications: ^22.3.0
+  flutter_tts: ^4.2.5
+  sensors_plus: ^6.1.1
+  pedometer: ^4.0.2
+  flutter_map: ^7.0.2
+  latlong2: ^0.9.1
 
 dev_dependencies:
   flutter_test:
     sdk: flutter
+  flutter_launcher_icons: "^0.13.1"
+
+flutter_launcher_icons:
+  android: "launcher_icon"
+  ios: true
+  web:
+    generate: true
+    image_path: "assets/icon.jpg"
+  image_path: "assets/icon.jpg"
+  remove_alpha_ios: true
 
 flutter:
   uses-material-design: true
+  assets:
+    - assets/models/
+    - assets/icon.jpg
+    - assets/icon.png
+    - assets/icon_in_app.png
+    - assets/App_Icon_Generation_3.png

@@ -66,5 +66,20 @@
 		<string>UIInterfaceOrientationLandscapeLeft</string>
 		<string>UIInterfaceOrientationLandscapeRight</string>
 	</array>
+	<key>UIBackgroundModes</key>
+	<array>
+		<string>location</string>
+		<string>audio</string>
+	</array>
+	<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
+	<string>แอปต้องการใช้ตำแหน่งเพื่อนำทางและเตือนสิ่งกีดขวางด้วยเสียงอย่างต่อเนื่องแม้ปิดหน้าจอ</string>
+	<key>NSLocationWhenInUseUsageDescription</key>
+	<string>แอปต้องการใช้ตำแหน่งเพื่อคำนวณเส้นทางและค้นหาสิ่งอำนวยความสะดวก</string>
+	<key>NSCameraUsageDescription</key>
+	<string>แอปต้องการใช้กล้องสำหรับระบบ AI สแกนตรวจจับสิ่งกีดขวางแบบเรียลไทม์</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>แอปต้องการใช้ไมโครโฟนเพื่อรับคำสั่งเสียงภาษาไทย</string>
+	<key>NSMotionUsageDescription</key>
+	<string>แอปต้องการใช้เซ็นเซอร์การเคลื่อนไหวเพื่อนับก้าวเดินและประมาณตำแหน่งขณะนำทาง</string>
 </dict>
 </plist>

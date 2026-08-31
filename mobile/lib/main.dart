@@ -4,7 +4,6 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import 'core/accessibility_notifier.dart';
 import 'features/onboarding/onboarding_screen.dart';
-import 'features/onboarding/profile_selection_screen.dart';
 import 'features/auth/auth_screen.dart';
 import 'features/home/home_screen.dart';
 import 'features/navigation/navigation_screen.dart';
@@ -15,11 +14,19 @@ import 'features/profile/profile_screen.dart';
 import 'features/navigation/map_loader.dart';
 import 'features/vision_assist/camera_loader.dart';
 import 'core/tts_helper.dart';
+import 'core/services/background_navigation_service.dart';
+import 'core/services/recovery_manager.dart';
 
-void main() {
+void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   registerMapIframe();
   registerWebcamView();
+  await BackgroundNavigationService.init();
+  // Check for interrupted navigation session (Recovery Manager)
+  final hasRecovery = await RecoveryManager().hasActiveSession();
+  if (hasRecovery) {
+    debugPrint('[Main] Found interrupted navigation session — will prompt resume');
+  }
   runApp(
     const ProviderScope(
       child: AccessibilityAssistantApp(),
@@ -33,6 +40,15 @@ class AccessibilityAssistantApp extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final acc = ref.watch(accessibilityProvider);
+
+    // Dynamic Color Palette: Volcanic Ash theme (Purple/Orange default, Blue/Amber for colorblind)
+    final Color primaryColor = acc.colorBlind 
+        ? const Color(0xFF0D47A1) // Colorblind-friendly Blue
+        : const Color(0xFF8338EC); // Volcanic Ash Purple
+
+    final Color secondaryColor = acc.colorBlind
+        ? const Color(0xFFFFB300) // Colorblind-friendly Amber
+        : const Color(0xFFFB5607); // Volcanic Ash Orange
 
     final Widget app = MaterialApp(
       title: 'Accessibility Assistant',
@@ -52,23 +68,25 @@ class AccessibilityAssistantApp extends ConsumerWidget {
       themeMode: acc.highContrast ? ThemeMode.dark : ThemeMode.light,
       theme: ThemeData(
         useMaterial3: true,
+        scaffoldBackgroundColor: const Color(0xFFE9ECEF), // Volcanic Ash Off-white background
         colorScheme: ColorScheme.fromSeed(
-          seedColor: const Color(0xFF004D40), // Lazarillo Deep Teal
-          primary: const Color(0xFF004D40),
-          secondary: const Color(0xFF00E676), // Neon Green
+          seedColor: primaryColor,
+          primary: primaryColor,
+          secondary: secondaryColor,
           brightness: Brightness.light,
         ),
-        appBarTheme: const AppBarTheme(
+        appBarTheme: AppBarTheme(
           centerTitle: true,
           elevation: 0,
-          backgroundColor: Color(0xFF004D40),
+          backgroundColor: primaryColor,
           foregroundColor: Colors.white,
         ),
         cardTheme: CardThemeData(
+          color: Colors.white,
           elevation: 2,
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(16),
-            side: const BorderSide(color: Color(0xFFE0E0E0), width: 1.5),
+            side: const BorderSide(color: Color(0xFFDDE1E5), width: 1.5), // Volcanic Ash border tint
           ),
         ),
         inputDecorationTheme: InputDecorationTheme(
@@ -76,17 +94,17 @@ class AccessibilityAssistantApp extends ConsumerWidget {
           fillColor: Colors.white,
           border: OutlineInputBorder(
             borderRadius: BorderRadius.circular(12),
-            borderSide: const BorderSide(color: Color(0xFF004D40), width: 1.5),
+            borderSide: BorderSide(color: primaryColor, width: 1.5),
           ),
           focusedBorder: OutlineInputBorder(
             borderRadius: BorderRadius.circular(12),
-            borderSide: const BorderSide(color: Color(0xFF00E676), width: 2.0),
+            borderSide: BorderSide(color: secondaryColor, width: 2.0),
           ),
           contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
         ),
         elevatedButtonTheme: ElevatedButtonThemeData(
           style: ElevatedButton.styleFrom(
-            backgroundColor: const Color(0xFF004D40),
+            backgroundColor: primaryColor,
             foregroundColor: Colors.white,
             padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 14),
             shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
@@ -96,21 +114,21 @@ class AccessibilityAssistantApp extends ConsumerWidget {
       darkTheme: ThemeData(
         useMaterial3: true,
         brightness: Brightness.dark,
+        scaffoldBackgroundColor: const Color(0xFF212529), // Volcanic Ash Dark Grey/Black background
         colorScheme: const ColorScheme.dark(
           primary: Colors.white,
-          secondary: Colors.white70,
-          surface: Colors.black,
+          secondary: Color(0xFFFB5607), // Volcanic Ash Orange
+          surface: Color(0xFF212529), // Volcanic Ash Dark Grey/Black
           onSurface: Colors.white,
         ),
-        scaffoldBackgroundColor: Colors.black,
         appBarTheme: const AppBarTheme(
           centerTitle: true,
           elevation: 0,
-          backgroundColor: Colors.black,
+          backgroundColor: Color(0xFF212529),
           foregroundColor: Colors.white,
         ),
         cardTheme: CardThemeData(
-          color: const Color(0xFF1A1A1A),
+          color: const Color(0xFF1E2125),
           elevation: 2,
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(16),
@@ -119,7 +137,7 @@ class AccessibilityAssistantApp extends ConsumerWidget {
         ),
         inputDecorationTheme: InputDecorationTheme(
           filled: true,
-          fillColor: const Color(0xFF1A1A1A),
+          fillColor: const Color(0xFF1E2125),
           border: OutlineInputBorder(
             borderRadius: BorderRadius.circular(12),
             borderSide: const BorderSide(color: Colors.white24),
@@ -138,7 +156,6 @@ class AccessibilityAssistantApp extends ConsumerWidget {
       home: const SplashScreen(),
       routes: {
         '/onboarding': (context) => const OnboardingScreen(),
-        '/profile_selection': (context) => const ProfileSelectionScreen(),
         '/auth': (context) => const AuthScreen(),
         '/home': (context) => const HomeScreen(),
         '/navigation': (context) => const NavigationScreen(),
@@ -211,7 +228,7 @@ class _SplashScreenState extends State<SplashScreen>
     );
     _fadeAnimation = CurvedAnimation(parent: _controller, curve: Curves.easeIn);
     _controller.forward();
-    announceSpeech("ยินดีต้อนรับสู่แอปพลิเคชัน ผู้ช่วยอัจฉริยะเพื่อการเข้าถึง", true);
+    announceSpeech("ยินดีต้อนรับสู่แอปพลิเคชัน TAM การเปลี่ยนแปลงการเข้าถึงเพื่อทุกคน", true);
     _navigateAfterDelay();
   }
 
@@ -246,7 +263,7 @@ class _SplashScreenState extends State<SplashScreen>
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: const Color(0xFF004D40),
+      backgroundColor: Theme.of(context).primaryColor,
       body: Center(
         child: FadeTransition(
           opacity: _fadeAnimation,
@@ -254,32 +271,52 @@ class _SplashScreenState extends State<SplashScreen>
             mainAxisSize: MainAxisSize.min,
             children: [
               Container(
-                padding: const EdgeInsets.all(20),
                 decoration: BoxDecoration(
                   color: Colors.white.withValues(alpha: 0.15),
-                  shape: BoxShape.circle,
+                  borderRadius: BorderRadius.circular(24),
                 ),
-                child: const Icon(
-                  Icons.accessibility_new,
-                  size: 64,
-                  color: Colors.white,
+                padding: const EdgeInsets.all(8),
+                child: ClipRRect(
+                  borderRadius: BorderRadius.circular(20),
+                  child: Image.asset(
+                    'assets/icon_in_app.png',
+                    width: 96,
+                    height: 96,
+                    fit: BoxFit.cover,
+                    errorBuilder: (_, __, ___) => const Icon(
+                      Icons.accessibility_new,
+                      size: 64,
+                      color: Colors.white,
+                    ),
+                  ),
                 ),
               ),
               const SizedBox(height: 24),
               const Text(
-                'Accessibility Assistant',
+                'TAM',
                 style: TextStyle(
-                  fontSize: 24,
+                  fontSize: 32,
                   fontWeight: FontWeight.bold,
                   color: Colors.white,
-                  letterSpacing: 0.5,
+                  letterSpacing: 1.0,
                 ),
               ),
-              const SizedBox(height: 8),
+              const SizedBox(height: 6),
+              Text(
+                'Transformation Accessibility Mass',
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                  fontSize: 16,
+                  fontWeight: FontWeight.w600,
+                  color: Colors.white.withValues(alpha: 0.95),
+                  letterSpacing: 0.3,
+                ),
+              ),
+              const SizedBox(height: 4),
               Text(
                 'ผู้ช่วยอัจฉริยะเพื่อการเข้าถึง',
                 style: TextStyle(
-                  fontSize: 14,
+                  fontSize: 13,
                   color: Colors.white.withValues(alpha: 0.8),
                 ),
               ),

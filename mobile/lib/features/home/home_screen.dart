@@ -9,11 +9,11 @@ import '../../core/tts_helper.dart';
 
 import '../navigation/navigation_screen.dart';
 import '../vision_assist/vision_assist_screen.dart';
-import '../communication/communication_screen.dart';
+import '../gesture_sos/gesture_sos_screen.dart';
 import '../profile/profile_screen.dart';
 
 class TabItem {
-  final int id; // 0: Home, 1: Navigation, 2: Camera, 3: Communication, 4: Profile
+  final int id; // 0: Home, 1: Camera, 2: Navigation, 3: SOS, 4: Profile
   final IconData icon;
   final String label;
   final Widget screen;
@@ -91,12 +91,18 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
       if (command.contains("ยกเลิก") || command.contains("หยุด") || command.contains("ปิด")) {
         isCancelCommand = true;
         speakMsg = "ยกเลิกและปิดระบบรับคำสั่งเสียงเรียบร้อยครับ";
-      } else if (command.contains("นำทาง") || command.contains("แผนที่") || command.contains("ไป") || command.contains("เส้นทาง")) {
-        targetIndex = 1;
-        speakMsg = "เปิดหน้าแผนที่นำทางช่วยเหลือครับ ต้องการเดินทางไปที่ไหนดีครับ?";
-      } else if (command.contains("กล้อง") || command.contains("สแกน") || command.contains("ตรวจจับ") || command.contains("สิ่งกีดขวาง")) {
+      } else if (command.contains("รถเมล์") || command.contains("bts") || command.contains("บีทีเอส") || command.contains("mrt") || command.contains("เอ็มอาร์ที") || command.contains("รถไฟฟ้า") || command.contains("ขนส่งสาธารณะ") || command.contains("รถประจำทาง")) {
         targetIndex = 2;
-        speakMsg = "เปิดหน้ากล้องตรวจจับสิ่งกีดขวางแล้วครับ";
+        speakMsg = "เปิดระบบนำทางด้วยขนส่งสาธารณะ ระบบจะเลือกค้นหาป้ายและสถานีที่ใกล้ที่สุดให้ครับ";
+      } else if (command.contains("แท็กซี่") || command.contains("แกร็บ") || command.contains("grab") || command.contains("taxi")) {
+        targetIndex = 2;
+        speakMsg = "เปิดระบบเรียกรถแท็กซี่และแกร็บสำหรับผู้พิการครับ";
+      } else if (command.contains("กล้อง") || command.contains("สแกน") || command.contains("ตรวจจับ") || command.contains("สิ่งกีดขวาง")) {
+        targetIndex = 1;
+        speakMsg = "เปิดหน้ากล้อง AI ตรวจจับสิ่งกีดขวางแล้วครับ";
+      } else if (command.contains("นำทาง") || command.contains("แผนที่") || command.contains("ไป") || command.contains("เส้นทาง")) {
+        targetIndex = 2;
+        speakMsg = "เปิดหน้านำทางด้วยเสียงแล้วครับ ต้องการเดินทางไปที่ไหนดีครับ?";
       } else if (command.contains("ช่วยเหลือ") || command.contains("เอสโอเอส") || command.contains("ฉุกเฉิน") || command.contains("sos") || command.contains("แจ้งเหตุ")) {
         targetIndex = 3;
         speakMsg = "เปิดหน้าขอความช่วยเหลือฉุกเฉินแล้วครับ";
@@ -169,66 +175,50 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
   Widget build(BuildContext context) {
     final acc = ref.watch(accessibilityProvider);
     final isHighContrast = acc.highContrast;
-    final themeColor = isHighContrast ? Colors.black : Colors.blue[900];
+    final themeColor = isHighContrast ? Colors.black : Theme.of(context).colorScheme.primary;
 
-    // Build active tabs list dynamically based on the current accessibility mode
-    late final List<TabItem> activeTabs;
-    activeTabs = [
+    // Fixed 5 active tabs specifically designed for blind users
+    final List<TabItem> activeTabs = [
       TabItem(
         id: 0,
         icon: Icons.home,
         label: 'หน้าแรก',
         screen: _HomeTabContent(
           onNavigateTab: (targetId) {
-            // Map original static tab ID to current dynamic active tab index
-            final targetIndex = activeTabs.indexWhere((tab) => tab.id == targetId);
-            if (targetIndex != -1) {
-              setState(() {
-                _currentIndex = targetIndex;
-              });
-            }
+            setState(() {
+              _currentIndex = targetId.clamp(0, 4);
+            });
           },
         ),
       ),
       TabItem(
         id: 1,
-        icon: Icons.navigation,
-        label: acc.accessibilityMode == 'visual' ? 'นำทางนำเสียง' : 'นำทาง',
+        icon: Icons.camera_alt_rounded,
+        label: 'กล้อง AI',
+        screen: const VisionAssistScreen(),
+      ),
+      TabItem(
+        id: 2,
+        icon: Icons.navigation_rounded,
+        label: 'นำทางเสียง',
         screen: const NavigationScreen(),
+      ),
+      TabItem(
+        id: 3,
+        icon: Icons.emergency_rounded,
+        label: 'ฉุกเฉิน SOS',
+        screen: const GestureSosScreen(),
+      ),
+      TabItem(
+        id: 4,
+        icon: Icons.person_rounded,
+        label: 'โปรไฟล์',
+        screen: const ProfileScreen(),
       ),
     ];
 
-    // Blind/Low-Vision users get the Object Detection Camera
-    if (acc.accessibilityMode == 'visual') {
-      activeTabs.add(TabItem(
-        id: 2,
-        icon: Icons.camera_alt,
-        label: 'กล้อง AI',
-        screen: const VisionAssistScreen(),
-      ));
-    }
-
-    // Deaf/Hearing/Speech Impaired users get the Sign Language & Translation tools
-    if (acc.accessibilityMode == 'speech_hearing') {
-      activeTabs.add(TabItem(
-        id: 3,
-        icon: Icons.chat_bubble_outline_rounded,
-        label: 'การสื่อสาร',
-        screen: const CommunicationScreen(),
-      ));
-    }
-
-    // Everyone gets Profile and Settings
-    activeTabs.add(TabItem(
-      id: 4,
-      icon: Icons.person,
-      label: 'โปรไฟล์',
-      screen: const ProfileScreen(),
-    ));
-
-    // Safely clamp index to avoid range crash when mode switching shrinks tab count
     if (_currentIndex >= activeTabs.length) {
-      _currentIndex = activeTabs.length - 1;
+      _currentIndex = 0;
     }
 
     return Scaffold(
@@ -243,7 +233,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
               right: 84,
               bottom: kBottomNavigationBarHeight + 16,
               child: Card(
-                color: isHighContrast ? Colors.black : Colors.blue[900],
+                color: isHighContrast ? Colors.black : Theme.of(context).colorScheme.primary,
                 elevation: 8,
                 shape: RoundedRectangleBorder(
                   side: isHighContrast ? const BorderSide(color: Colors.white, width: 2) : BorderSide.none,
@@ -290,7 +280,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                 onPressed: _toggleLiveVoiceMode,
                 backgroundColor: _isLiveVoiceActive 
                     ? Colors.red 
-                    : (isHighContrast ? Colors.white : Colors.blue[900]),
+                    : (isHighContrast ? Colors.white : Theme.of(context).colorScheme.primary),
                 foregroundColor: _isLiveVoiceActive 
                     ? Colors.white 
                     : (isHighContrast ? Colors.black : Colors.white),
@@ -306,7 +296,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
       bottomNavigationBar: BottomNavigationBar(
         currentIndex: _currentIndex,
         backgroundColor: isHighContrast ? Colors.black : Colors.white,
-        selectedItemColor: isHighContrast ? Colors.white : Colors.blue[900],
+        selectedItemColor: isHighContrast ? Colors.white : Theme.of(context).colorScheme.primary,
         unselectedItemColor: Colors.grey,
         type: BottomNavigationBarType.fixed,
         onTap: (index) => _onTabTapped(index, acc),
@@ -424,78 +414,35 @@ class _HomeTabContentState extends ConsumerState<_HomeTabContent> {
     });
   }
 
-  void _showQuickMessageDialog(BuildContext context, String message, AccessibilityState acc) {
-    showDialog(
-      context: context,
-      builder: (context) {
-        final isHighContrast = acc.highContrast;
-        return Dialog(
-          backgroundColor: isHighContrast ? Colors.black : Colors.white,
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(20),
-            side: isHighContrast ? const BorderSide(color: Colors.white, width: 3) : BorderSide.none,
-          ),
-          child: Padding(
-            padding: const EdgeInsets.all(24.0),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                Align(
-                  alignment: Alignment.topRight,
-                  child: IconButton(
-                    icon: Icon(Icons.close, size: 32, color: isHighContrast ? Colors.white : Colors.black),
-                    onPressed: () => Navigator.pop(context),
-                  ),
-                ),
-                const SizedBox(height: 16),
-                Text(
-                  message,
-                  textAlign: TextAlign.center,
-                  style: TextStyle(
-                    fontSize: 28 * acc.fontScale,
-                    fontWeight: FontWeight.bold,
-                    color: isHighContrast ? Colors.yellow : Colors.blue[900],
-                  ),
-                ),
-                const SizedBox(height: 32),
-                SizedBox(
-                  height: 54,
-                  child: ElevatedButton(
-                    onPressed: () => Navigator.pop(context),
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: isHighContrast ? Colors.white : Colors.blue[800],
-                      foregroundColor: isHighContrast ? Colors.black : Colors.white,
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                    ),
-                    child: Text(
-                      'ปิดหน้าต่าง',
-                      style: TextStyle(fontSize: 18 * acc.fontScale, fontWeight: FontWeight.bold),
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ),
-        );
-      },
-    );
-  }
 
   @override
   Widget build(BuildContext context) {
     final acc = ref.watch(accessibilityProvider);
     final isHighContrast = acc.highContrast;
-    final themeColor = isHighContrast ? Colors.black : Colors.blue[900];
+    final themeColor = isHighContrast ? Colors.black : Theme.of(context).colorScheme.primary;
 
     return Scaffold(
       appBar: AppBar(
-        title: Text(
-          'หน้าแรก',
-          style: TextStyle(
-            fontSize: 20 * acc.fontScale,
-            fontWeight: FontWeight.bold,
-          ),
+        title: Row(
+          children: [
+            ClipRRect(
+              borderRadius: BorderRadius.circular(8),
+              child: Image.asset(
+                'assets/icon_in_app.png',
+                width: 32,
+                height: 32,
+                errorBuilder: (_, __, ___) => const Icon(Icons.accessibility_new_rounded, size: 28),
+              ),
+            ),
+            const SizedBox(width: 10),
+            Text(
+              'หน้าแรก (TAM)',
+              style: TextStyle(
+                fontSize: 20 * acc.fontScale,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+          ],
         ),
         backgroundColor: themeColor,
         foregroundColor: Colors.white,
@@ -505,22 +452,40 @@ class _HomeTabContentState extends ConsumerState<_HomeTabContent> {
         child: AnimatedOpacity(
           opacity: _isLoading ? 0.3 : 1.0,
           duration: const Duration(milliseconds: 500),
-          child: Padding(
+          child: SingleChildScrollView(
+            physics: const BouncingScrollPhysics(),
             padding: const EdgeInsets.all(16.0),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                // Greeting Header
-                Semantics(
-                  label: 'คำทักทาย',
-                  child: Text(
-                    _getGreeting(),
-                    style: TextStyle(
-                      fontSize: 24 * acc.fontScale,
-                      fontWeight: FontWeight.bold,
-                      color: isHighContrast ? Colors.white : Colors.black87,
+                // Greeting Header with In-App Icon
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Expanded(
+                      child: Semantics(
+                        label: 'คำทักทาย',
+                        child: Text(
+                          _getGreeting(),
+                          style: TextStyle(
+                            fontSize: 24 * acc.fontScale,
+                            fontWeight: FontWeight.bold,
+                            color: isHighContrast ? Colors.white : Colors.black87,
+                          ),
+                        ),
+                      ),
                     ),
-                  ),
+                    ClipRRect(
+                      borderRadius: BorderRadius.circular(12),
+                      child: Image.asset(
+                        'assets/icon_in_app.png',
+                        width: 44,
+                        height: 44,
+                        fit: BoxFit.cover,
+                        errorBuilder: (_, __, ___) => const Icon(Icons.accessibility_new_rounded, size: 36),
+                      ),
+                    ),
+                  ],
                 ),
                 const SizedBox(height: 16.0),
 
@@ -568,13 +533,11 @@ class _HomeTabContentState extends ConsumerState<_HomeTabContent> {
                     ),
                   ),
                 ),
-                const SizedBox(height: 24.0),
+                const SizedBox(height: 20.0),
 
                 // Dynamic Content based on Accessibility Mode
-                Expanded(
-                  child: _buildDynamicBody(context, acc, ref),
-                ),
-                const SizedBox(height: 16.0),
+                _buildDynamicBody(context, acc, ref),
+                const SizedBox(height: 8.0),
 
                 // SOS Warning trigger shortcut
                 Semantics(
@@ -586,22 +549,36 @@ class _HomeTabContentState extends ConsumerState<_HomeTabContent> {
                     onTapCancel: () => _cancelSosCountdown(),
                     child: AnimatedContainer(
                       duration: const Duration(milliseconds: 100),
-                      padding: const EdgeInsets.symmetric(vertical: 20.0),
+                      padding: const EdgeInsets.symmetric(vertical: 18.0),
                       decoration: BoxDecoration(
                         color: _isSosPressed ? Colors.red[900] : Colors.red[700],
-                        borderRadius: BorderRadius.circular(12.0),
+                        borderRadius: BorderRadius.circular(16.0),
                         border: isHighContrast ? Border.all(color: Colors.white, width: 2) : null,
+                        boxShadow: isHighContrast ? [] : [
+                          BoxShadow(
+                            color: Colors.red.withOpacity(0.3),
+                            blurRadius: 10,
+                            offset: const Offset(0, 4),
+                          ),
+                        ],
                       ),
                       child: Column(
                         children: [
-                          Text(
-                            'กดค้างเพื่อส่งสัญญาณฉุกเฉิน (SOS)',
-                            textAlign: TextAlign.center,
-                            style: TextStyle(
-                              fontSize: 18 * acc.fontScale,
-                              fontWeight: FontWeight.bold,
-                              color: Colors.white,
-                            ),
+                          Row(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              const Icon(Icons.emergency_rounded, color: Colors.white, size: 24),
+                              const SizedBox(width: 8),
+                              Text(
+                                'กดค้างเพื่อส่งสัญญาณฉุกเฉิน (SOS)',
+                                textAlign: TextAlign.center,
+                                style: TextStyle(
+                                  fontSize: 17 * acc.fontScale,
+                                  fontWeight: FontWeight.bold,
+                                  color: Colors.white,
+                                ),
+                              ),
+                            ],
                           ),
                           if (_isSosPressed)
                             Padding(
@@ -620,6 +597,7 @@ class _HomeTabContentState extends ConsumerState<_HomeTabContent> {
                     ),
                   ),
                 ),
+                const SizedBox(height: 32.0),
               ],
             ),
           ),
@@ -646,7 +624,7 @@ class _HomeTabContentState extends ConsumerState<_HomeTabContent> {
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(16.0),
           side: BorderSide(
-            color: isHighContrast ? Colors.white : const Color(0xFF004D40),
+            color: isHighContrast ? Colors.white : color,
             width: isHighContrast ? 2.5 : 1.5,
           ),
         ),
@@ -706,197 +684,40 @@ class _HomeTabContentState extends ConsumerState<_HomeTabContent> {
     );
   }
 
-  void _showQuickCardsDialog(BuildContext context, AccessibilityState acc) {
-    final isHighContrast = acc.highContrast;
-    final quickMessages = [
-      'ขอยืนยันจุดขึ้นรถไฟฟ้า / ลิฟต์โดยสาร',
-      'ช่วยนำทางไปห้องน้ำผู้พิการหน่อยครับ',
-      'ต้องการติดต่อเจ้าหน้าที่สถานีด่วน',
-      'ขอทางเข้าจุดบริการรถสาธารณะ / แท็กซี่',
-    ];
-
-    showDialog(
-      context: context,
-      builder: (context) {
-        return Dialog(
-          backgroundColor: isHighContrast ? Colors.black : Colors.white,
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(24),
-            side: isHighContrast ? const BorderSide(color: Colors.white, width: 3) : const BorderSide(color: Color(0xFF004D40), width: 1.5),
-          ),
-          child: Padding(
-            padding: const EdgeInsets.all(20.0),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    Text(
-                      '💬 ข้อความด่วน (Quick Cards)',
-                      style: TextStyle(
-                        fontSize: 18 * acc.fontScale,
-                        fontWeight: FontWeight.bold,
-                        color: isHighContrast ? Colors.white : const Color(0xFF004D40),
-                      ),
-                    ),
-                    IconButton(
-                      icon: Icon(Icons.close, size: 28, color: isHighContrast ? Colors.white : Colors.black),
-                      onPressed: () => Navigator.pop(context),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 16),
-                GridView.builder(
-                  shrinkWrap: true,
-                  physics: const NeverScrollableScrollPhysics(),
-                  gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-                    crossAxisCount: 2,
-                    crossAxisSpacing: 12,
-                    mainAxisSpacing: 12,
-                    childAspectRatio: 1.2,
-                  ),
-                  itemCount: quickMessages.length,
-                  itemBuilder: (context, index) {
-                    final msg = quickMessages[index];
-                    return Card(
-                      margin: EdgeInsets.zero,
-                      color: isHighContrast ? Colors.black : const Color(0xFFE0F2F1),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(16),
-                        side: BorderSide(
-                          color: isHighContrast ? Colors.white : const Color(0xFF004D40),
-                          width: isHighContrast ? 2 : 1,
-                        ),
-                      ),
-                      elevation: 0,
-                      child: InkWell(
-                        onTap: () {
-                          Navigator.pop(context);
-                          _showQuickMessageDialog(context, msg, acc);
-                        },
-                        borderRadius: BorderRadius.circular(16),
-                        child: Padding(
-                          padding: const EdgeInsets.all(10.0),
-                          child: Center(
-                            child: Text(
-                              msg,
-                              textAlign: TextAlign.center,
-                              style: TextStyle(
-                                fontSize: 13 * acc.fontScale,
-                                fontWeight: FontWeight.bold,
-                                color: isHighContrast ? Colors.white : const Color(0xFF004D40),
-                              ),
-                            ),
-                          ),
-                        ),
-                      ),
-                    );
-                  },
-                ),
-              ],
-            ),
-          ),
-        );
-      },
-    );
-  }
-
   Widget _buildDynamicBody(BuildContext context, AccessibilityState acc, WidgetRef ref) {
     final isHighContrast = acc.highContrast;
+    final primary = Theme.of(context).colorScheme.primary;
+    final secondary = Theme.of(context).colorScheme.secondary;
 
-    if (acc.accessibilityMode == 'visual') {
-      return Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          _buildDirectoryItem(
-            icon: Icons.camera_alt,
-            title: 'กล้อง AI นำทาง',
-            description: 'สแกนตรวจจับและเตือนความต่างระดับหรือสิ่งกีดขวางแบบเรียลไทม์',
-            color: const Color(0xFF004D40),
-            onTap: () {
-              _triggerHaptic(acc);
-              widget.onNavigateTab(2); // Vision tab
-            },
-            acc: acc,
-            isHighContrast: isHighContrast,
-          ),
-          _buildDirectoryItem(
-            icon: Icons.explore,
-            title: 'ระบบนำทางด้วยเสียง',
-            description: 'ค้นหาเส้นทางระบุพิกัดนำทางด้วยเสียงแบบเรียลไทม์',
-            color: Colors.teal[800]!,
-            onTap: () {
-              _triggerHaptic(acc);
-              widget.onNavigateTab(1); // Navigation tab
-            },
-            acc: acc,
-            isHighContrast: isHighContrast,
-          ),
-        ],
-      );
-    } else if (acc.accessibilityMode == 'wheelchair') {
-      return Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          _buildDirectoryItem(
-            icon: Icons.accessible_forward,
-            title: 'แผนที่เส้นทางสำหรับวีลแชร์',
-            description: 'เส้นทางพิเศษเลี่ยงสิ่งกีดขวาง ค้นหาทางลาด และลิฟต์สำหรับวีลแชร์',
-            color: const Color(0xFF004D40),
-            onTap: () {
-              _triggerHaptic(acc);
-              widget.onNavigateTab(1); // Navigation tab
-            },
-            acc: acc,
-            isHighContrast: isHighContrast,
-          ),
-          _buildDirectoryItem(
-            icon: Icons.support_agent,
-            title: 'ติดต่อผู้ดูแล / ผู้ช่วยเหลือ',
-            description: 'ติดต่อเจ้าหน้าที่ดูแลความสะดวกประจำรถไฟฟ้าหรือญาติสนิททันที',
-            color: Colors.teal[800]!,
-            onTap: () {
-              _triggerHaptic(acc);
-              widget.onNavigateTab(4); // Profile / Contact tab
-            },
-            acc: acc,
-            isHighContrast: isHighContrast,
-          ),
-        ],
-      );
-    } else {
-      return Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          _buildDirectoryItem(
-            icon: Icons.chat_bubble_outline_rounded,
-            title: 'ข้อความช่วยเหลือด่วน (Quick Cards)',
-            description: 'ขยายข้อความด่วนขนาดใหญ่เต็มหน้าจอมือถือเพื่อยื่นโชว์สื่อสารกับผู้อื่น',
-            color: const Color(0xFF004D40),
-            onTap: () {
-              _triggerHaptic(acc);
-              _showQuickCardsDialog(context, acc);
-            },
-            acc: acc,
-            isHighContrast: isHighContrast,
-          ),
-          _buildDirectoryItem(
-            icon: Icons.camera_front_rounded,
-            title: 'เปิดกล้องตรวจจับสัญญาณ SOS',
-            description: 'โบกมือผ่านกล้องหน้านับถอยหลังส่งพิกัดฉุกเฉินส่งให้คนสนิท',
-            color: Colors.teal[800]!,
-            onTap: () {
-              _triggerHaptic(acc);
-              widget.onNavigateTab(3); // SOS tab
-            },
-            acc: acc,
-            isHighContrast: isHighContrast,
-          ),
-        ],
-      );
-    }
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        _buildDirectoryItem(
+          icon: Icons.camera_alt_rounded,
+          title: 'กล้อง AI ตรวจจับสิ่งกีดขวาง',
+          description: 'สแกนตรวจจับเสา พื้นต่างระดับ และสิ่งกีดขวาง พร้อมเสียงเตือนและระบบสั่นแบบเรียลไทม์',
+          color: primary,
+          onTap: () {
+            _triggerHaptic(acc);
+            widget.onNavigateTab(1); // Tab 1: Vision Camera
+          },
+          acc: acc,
+          isHighContrast: isHighContrast,
+        ),
+        _buildDirectoryItem(
+          icon: Icons.navigation_rounded,
+          title: 'ระบบนำทางด้วยเสียง (Voice Nav)',
+          description: 'ค้นหาเส้นทาง นำทางแบบ Turn-by-Turn เลี่ยงสิ่งกีดขวางตามแนวทางเดินเบรลล์',
+          color: secondary,
+          onTap: () {
+            _triggerHaptic(acc);
+            widget.onNavigateTab(2); // Tab 2: Navigation
+          },
+          acc: acc,
+          isHighContrast: isHighContrast,
+        ),
+      ],
+    );
   }
 }
 
