@@ -39,6 +39,7 @@ class _NavigationScreenState extends ConsumerState<NavigationScreen> with Ticker
   final TextEditingController _destController = TextEditingController();
   
   bool _isNavigating = false;
+  bool _isCardCollapsed = false;
   bool _isLoading = false;
   bool _showRerouteAlert = false;
   int _selectedRouteIndex = 0; // 0 = Safe Route, 1 = Shortest Unsafe Route
@@ -854,10 +855,12 @@ class _NavigationScreenState extends ConsumerState<NavigationScreen> with Ticker
           // Floating Map Controls (+ / - / Recenter GPS)
           Positioned(
             right: 16.0,
-            bottom: _isNavigating ? 180.0 : 100.0,
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
+            top: _isNavigating ? (_isCardCollapsed ? 90.0 : 24.0) : null,
+            bottom: _isNavigating ? null : 90.0,
+            child: PointerInterceptor(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
                 FloatingActionButton.small(
                   heroTag: 'zoom_in_btn',
                   backgroundColor: isHighContrast ? Colors.black : Colors.white,
@@ -903,6 +906,7 @@ class _NavigationScreenState extends ConsumerState<NavigationScreen> with Ticker
               ],
             ),
           ),
+        ),
 
           // Search Form Card overlay
           // 1. Search Form Card overlay (Shown ONLY when !_isNavigating)
@@ -1173,62 +1177,163 @@ class _NavigationScreenState extends ConsumerState<NavigationScreen> with Ticker
               ),
             ),
 
-          // 2. Live Navigation Guidance Sheet (Shown ONLY when _isNavigating at top: 16, fully scrollable)
-          if (_isNavigating)
-            Positioned(
-              top: 16.0,
-              right: 16.0,
-              left: 16.0,
-              bottom: 90.0,
-              child: PointerInterceptor(
-                child: Card(
-                  color: isHighContrast ? Colors.black : Colors.white,
-                  elevation: isHighContrast ? 0 : 8,
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(16),
-                    side: isHighContrast ? const BorderSide(color: Colors.white, width: 2) : BorderSide.none,
+          // 2. Live Navigation Guidance Sheet (Collapsible & Expandable)
+          if (_isNavigating) ...[
+            if (_isCardCollapsed)
+              // ─── Collapsed Compact Floating Pill Banner ───
+              Positioned(
+                top: 16.0,
+                left: 16.0,
+                right: 16.0,
+                child: PointerInterceptor(
+                  child: Card(
+                    color: isHighContrast ? Colors.black : Colors.white,
+                    elevation: 8,
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(16),
+                      side: isHighContrast ? const BorderSide(color: Colors.white, width: 2) : BorderSide.none,
+                    ),
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 12.0, vertical: 10.0),
+                      child: Row(
+                        children: [
+                          CircleAvatar(
+                            radius: 20,
+                            backgroundColor: isHighContrast ? Colors.white24 : Colors.green[800],
+                            child: Icon(_liveDirectionIcon, color: Colors.white, size: 22),
+                          ),
+                          const SizedBox(width: 10),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Text(
+                                  _liveInstruction,
+                                  style: TextStyle(
+                                    fontSize: 13 * acc.fontScale,
+                                    fontWeight: FontWeight.bold,
+                                    color: isHighContrast ? Colors.white : Colors.black87,
+                                  ),
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                                Text(
+                                  _remainingDistance > 1000
+                                      ? 'เหลือ ${(_remainingDistance / 1000).toStringAsFixed(1)} กม. • ${_getModeSummaryText(_currentTravelMode)}'
+                                      : 'เหลือ $_remainingDistance ม. • ${_getModeSummaryText(_currentTravelMode)}',
+                                  style: TextStyle(
+                                    fontSize: 11 * acc.fontScale,
+                                    color: isHighContrast ? Colors.lightGreenAccent : Colors.green[800],
+                                    fontWeight: FontWeight.w600,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                          const SizedBox(width: 6),
+                          // Expand Button (ขยายดูข้อมูล)
+                          ElevatedButton.icon(
+                            icon: const Icon(Icons.unfold_more_rounded, size: 16),
+                            label: Text('ขยายการ์ด', style: TextStyle(fontSize: 11 * acc.fontScale, fontWeight: FontWeight.bold)),
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: isHighContrast ? Colors.yellowAccent : primaryColor,
+                              foregroundColor: isHighContrast ? Colors.black : Colors.white,
+                              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                            ),
+                            onPressed: () => setState(() => _isCardCollapsed = false),
+                          ),
+                          const SizedBox(width: 4),
+                          // Quick Cancel Button
+                          IconButton(
+                            icon: const Icon(Icons.close_rounded, color: Colors.red, size: 20),
+                            tooltip: 'ยกเลิกการนำทาง',
+                            onPressed: () {
+                              _navigationTimer?.cancel();
+                              BackgroundNavigationService.stopNavigation();
+                              setState(() {
+                                _isNavigating = false;
+                                _isCardCollapsed = false;
+                                _showRerouteAlert = false;
+                              });
+                            },
+                          ),
+                        ],
+                      ),
+                    ),
                   ),
-                  child: Padding(
-                    padding: const EdgeInsets.all(14.0),
-                    child: SingleChildScrollView(
-                      physics: const BouncingScrollPhysics(),
+                ),
+              )
+            else
+              // ─── Expanded Full Details Navigation Card ───
+              Positioned(
+                top: 16.0,
+                right: 16.0,
+                left: 16.0,
+                bottom: 80.0,
+                child: PointerInterceptor(
+                  child: Card(
+                    color: isHighContrast ? Colors.black : Colors.white,
+                    elevation: isHighContrast ? 0 : 8,
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(16),
+                      side: isHighContrast ? const BorderSide(color: Colors.white, width: 2) : BorderSide.none,
+                    ),
+                    child: Padding(
+                      padding: const EdgeInsets.all(14.0),
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          // Trip Top Bar: Origin -> Destination + Cancel Button
+                          // Trip Top Bar: Origin -> Destination + Collapse Button + Cancel Button
                           Row(
                             children: [
                               Expanded(
-                                child: Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    Text(
-                                      '${_originController.text} ➔ ${_destController.text}',
-                                      style: TextStyle(
-                                        fontSize: 13 * acc.fontScale,
-                                        fontWeight: FontWeight.bold,
-                                        color: isHighContrast ? Colors.white70 : Colors.grey[800],
-                                      ),
-                                      maxLines: 1,
-                                      overflow: TextOverflow.ellipsis,
-                                    ),
-                                  ],
+                                child: Text(
+                                  '${_originController.text} ➔ ${_destController.text}',
+                                  style: TextStyle(
+                                    fontSize: 13 * acc.fontScale,
+                                    fontWeight: FontWeight.bold,
+                                    color: isHighContrast ? Colors.white70 : Colors.grey[800],
+                                  ),
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
                                 ),
                               ),
-                              const SizedBox(width: 8),
+                              const SizedBox(width: 6),
+                              // Collapse Button (พับเก็บการ์ด)
+                              TextButton.icon(
+                                icon: const Icon(Icons.unfold_less_rounded, size: 16),
+                                label: Text(
+                                  'พับเก็บการ์ด',
+                                  style: TextStyle(
+                                    fontSize: 11.5 * acc.fontScale,
+                                    fontWeight: FontWeight.bold,
+                                  ),
+                                ),
+                                style: TextButton.styleFrom(
+                                  foregroundColor: isHighContrast ? Colors.yellowAccent : primaryColor,
+                                  backgroundColor: isHighContrast ? Colors.white10 : primaryColor.withOpacity(0.08),
+                                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                                ),
+                                onPressed: () => setState(() => _isCardCollapsed = true),
+                              ),
+                              const SizedBox(width: 6),
+                              // Cancel Button (ยกเลิก)
                               OutlinedButton.icon(
                                 icon: const Icon(Icons.close_rounded, size: 16),
                                 label: Text(
                                   'ยกเลิก',
                                   style: TextStyle(
-                                    fontSize: 12 * acc.fontScale,
+                                    fontSize: 11.5 * acc.fontScale,
                                     fontWeight: FontWeight.bold,
                                   ),
                                 ),
                                 style: OutlinedButton.styleFrom(
-                                  side: BorderSide(color: Colors.red[700]!, width: 1.5),
+                                  side: BorderSide(color: Colors.red[700]!, width: 1.2),
                                   foregroundColor: Colors.red[700],
-                                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                                   shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
                                 ),
                                 onPressed: () {
@@ -1236,13 +1341,20 @@ class _NavigationScreenState extends ConsumerState<NavigationScreen> with Ticker
                                   BackgroundNavigationService.stopNavigation();
                                   setState(() {
                                     _isNavigating = false;
+                                    _isCardCollapsed = false;
                                     _showRerouteAlert = false;
                                   });
                                 },
                               ),
                             ],
                           ),
-                          const Divider(height: 16),
+                          const Divider(height: 14),
+                          Expanded(
+                            child: SingleChildScrollView(
+                              physics: const BouncingScrollPhysics(),
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
 
                           // ─── Risk State Badge + GPS Confidence (ข้อ 5, 6, 10) ───
                           Container(
@@ -1565,16 +1677,20 @@ class _NavigationScreenState extends ConsumerState<NavigationScreen> with Ticker
                                     ),
                                   ),
                                 ),
-                              ],
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
-                ),
-              ),
-            ),
+                              ], // closes AI Helper Column children
+                            ), // closes AI Helper Column
+                          ), // closes AI Helper Container
+                        ], // closes Scrollable Column children
+                      ), // closes Scrollable Column
+                    ), // closes SingleChildScrollView
+                  ), // closes Expanded
+                ], // closes Outer Column children
+              ), // closes Outer Column
+            ), // closes Padding
+          ), // closes Card
+        ), // closes PointerInterceptor
+      ), // closes Positioned
+    ], // closes if (_isNavigating) ...[
 
           // Map Filter Options Toolbar (Chips)
           // GIS Accessibility Layer Filter Chips (Visible at bottom of map)
