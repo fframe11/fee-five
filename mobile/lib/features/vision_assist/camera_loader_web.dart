@@ -186,7 +186,7 @@ void registerWebcam() {
       "  canvas.height = video.videoHeight || 480;"
       "  var ctx = canvas.getContext('2d');"
       "  ctx.drawImage(video, 0, 0, canvas.width, canvas.height);"
-      "  return canvas.toDataURL('image/jpeg');"
+      "  return canvas.toDataURL('image/jpeg', 0.95);"
       "};"
 
       // 4. Proximity calculator based on bounding box size of detected objects
@@ -309,7 +309,13 @@ void registerWebcam() {
         ..style.objectFit = 'cover'
         ..style.pointerEvents = 'none';
       
-      html.window.navigator.mediaDevices?.getUserMedia({'video': true}).then((stream) {
+      html.window.navigator.mediaDevices?.getUserMedia({
+        'video': {
+          'width': {'ideal': 1280},
+          'height': {'ideal': 720},
+          'facingMode': 'environment'
+        }
+      }).then((stream) {
         videoElement.srcObject = stream;
         js.context.callMethod('initCocoModel');
         js.context.callMethod('initMediaPipeHands');

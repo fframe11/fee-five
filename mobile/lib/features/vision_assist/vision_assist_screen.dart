@@ -883,63 +883,7 @@ YOUR TASK (STAGE 2 PROOFING & REFINEMENT):
                     ),
                   ),
                 
-                if (_isScanning)
-                  Positioned(
-                    top: 16,
-                    left: 16,
-                    right: 16,
-                    child: Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      children: [
-                        Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                          decoration: BoxDecoration(
-                            color: isHighContrast ? Colors.black : Colors.green[900]?.withOpacity(0.85),
-                            border: Border.all(color: Colors.lightGreenAccent, width: 1.2),
-                            borderRadius: BorderRadius.circular(10),
-                          ),
-                          child: Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              const Icon(Icons.bolt_rounded, color: Colors.yellowAccent, size: 14),
-                              const SizedBox(width: 4),
-                              Text(
-                                'L1: YOLO Edge',
-                                style: TextStyle(
-                                  color: Colors.white,
-                                  fontSize: 11 * acc.fontScale,
-                                  fontWeight: FontWeight.bold,
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                        Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                          decoration: BoxDecoration(
-                            color: isHighContrast ? Colors.black : Colors.indigo[900]?.withOpacity(0.85),
-                            border: Border.all(color: Colors.lightBlueAccent, width: 1.2),
-                            borderRadius: BorderRadius.circular(10),
-                          ),
-                          child: Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              const Icon(Icons.cloud_done_rounded, color: Colors.lightBlueAccent, size: 14),
-                              const SizedBox(width: 4),
-                              Text(
-                                'L2: Vision AI',
-                                style: TextStyle(
-                                  color: Colors.white,
-                                  fontSize: 11 * acc.fontScale,
-                                  fontWeight: FontWeight.bold,
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
+
                   
                 if (_isScanning)
                   Positioned(
