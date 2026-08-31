@@ -24,6 +24,8 @@ class DetectedObstacle {
   final double y;
   final double w;
   final double h;
+  final bool isValid;
+  final String? proofReason;
 
   DetectedObstacle({
     required this.label,
@@ -32,6 +34,8 @@ class DetectedObstacle {
     required this.y,
     required this.w,
     required this.h,
+    this.isValid = true,
+    this.proofReason,
   });
 
   factory DetectedObstacle.fromJson(Map<String, dynamic> json) {
@@ -84,6 +88,9 @@ class DetectedObstacle {
       normalizedLabel = lbl;
     }
 
+    final bool valid = (json['is_valid'] ?? true) != false;
+    final String? reason = json['proof_reason']?.toString();
+
     return DetectedObstacle(
       label: normalizedLabel,
       score: sc,
@@ -91,6 +98,8 @@ class DetectedObstacle {
       y: yVal,
       w: wVal,
       h: hVal,
+      isValid: valid,
+      proofReason: reason,
     );
   }
 }
@@ -245,8 +254,8 @@ class _VisionAssistScreenState extends ConsumerState<VisionAssistScreen> with Ti
       _isAnalyzingShot = true;
     });
 
-    List<DetectedObstacle> layer1Detections = [];
-    List<DetectedObstacle> layer2Detections = [];
+    List<DetectedObstacle> stage1Candidates = [];
+    List<DetectedObstacle> proofedDetections = [];
 
     try {
       String? base64Img = captureFrame();
@@ -263,27 +272,49 @@ class _VisionAssistScreenState extends ConsumerState<VisionAssistScreen> with Ti
       }
 
       if (base64Img != null && base64Img.isNotEmpty) {
-        // --- LAYER 1: Fast On-Device YOLO / TFLite Inference ---
+        // =====================================================================
+        // 📸 STAGE 1: Fast Edge Candidate Detection (YOLO-World / TFLite)
+        // =====================================================================
         try {
           final tfliteResults = await _tfliteService.detectOnBase64(base64Img);
           if (tfliteResults.isNotEmpty) {
             for (var item in tfliteResults) {
-              layer1Detections.add(DetectedObstacle.fromJson(item));
+              stage1Candidates.add(DetectedObstacle.fromJson(item));
             }
           }
         } catch (e) {
-          debugPrint('[Layer 1 YOLO] On-device inference error: $e');
+          debugPrint('[Stage 1 YOLO-World] Edge inference error: $e');
         }
 
-        // --- LAYER 2: Cloud / Backend Vision AI Deep Context Analysis ---
+        // =====================================================================
+        // 🧠 STAGE 2: Gemini / Vision AI Proofing & Verification Gate
+        // Proofs whether YOLO candidate detections are True or False Positives
+        // =====================================================================
         try {
+          final candidateSummary = stage1Candidates.map((c) => {
+            'label': c.label,
+            'score': c.score,
+            'bbox_2d': [(c.y * 1000).round(), (c.x * 1000).round(), ((c.y + c.h) * 1000).round(), ((c.x + c.w) * 1000).round()]
+          }).toList();
+
+          final proofingPrompt = '''You are a Critical Computer Vision Proofing & Verification Engine for visually impaired pedestrian navigation.
+
+STAGE 1 RAW YOLO-WORLD CANDIDATE DETECTIONS:
+${jsonEncode(candidateSummary)}
+
+YOUR TASK (STAGE 2 PROOFING & REFINEMENT):
+1. Proof each Stage 1 candidate detection against the actual image:
+   - If it is a FALSE POSITIVE (e.g. wallpaper pattern, light reflection, harmless shadow, background clutter), DISCARD it with "is_valid": false.
+   - If it is a TRUE physical obstacle or facility (e.g. pillar, column, pole, stairs, pothole, curb, barrier, door, table, chair, glass window, vehicle), CONFIRM it with "is_valid": true, refine its exact bounding box [ymin, xmin, ymax, xmax] (normalized 0 to 1000) and provide a concise Thai proof reason.
+2. Detect any critical physical hazards directly on the walking path that YOLO missed.
+3. Return ONLY a valid JSON array of objects without extra text:
+[
+  {"label": "pillar", "score": 0.95, "is_valid": true, "proof_reason": "ยืนยันเสาคอนกรีตจริงกลางทางเดิน", "bbox_2d": [ymin, xmin, ymax, xmax]}
+]''';
+
           final description = await ApiClient().analyzeVisionImage(
             base64Img,
-            prompt: 'You are an objective computer vision obstacle detector for visually impaired pedestrian navigation.\n'
-                'Analyze this camera image and accurately detect physical structures and obstacles (such as window, door, pillar, wall, pole, stairs, pothole, curb, barrier, chair, table, vehicle, pedestrian, uneven ground, sign, cctv, sticker).\n'
-                'Return ONLY a valid JSON array of objects without extra commentary:\n'
-                '[{"label": "pillar", "score": 0.95, "bbox_2d": [ymin, xmin, ymax, xmax]}]\n'
-                'where coordinates are normalized 0 to 1000. If no objects are found, return [].',
+            prompt: proofingPrompt,
           ).timeout(const Duration(seconds: 10));
 
           String jsonStr = description.trim();
@@ -292,36 +323,34 @@ class _VisionAssistScreenState extends ConsumerState<VisionAssistScreen> with Ti
           if (startIdx != -1 && endIdx != -1 && endIdx > startIdx) {
             jsonStr = jsonStr.substring(startIdx, endIdx + 1);
             final List<dynamic> decoded = jsonDecode(jsonStr);
-            layer2Detections = decoded.map((item) => DetectedObstacle.fromJson(item)).toList();
+            for (var item in decoded) {
+              if (item is Map<String, dynamic>) {
+                final isValid = item['is_valid'] ?? true;
+                if (isValid == true || isValid == 'true') {
+                  proofedDetections.add(DetectedObstacle.fromJson(item));
+                }
+              }
+            }
           }
         } catch (e) {
-          debugPrint('[Layer 2 API] Vision AI error: $e');
+          debugPrint('[Stage 2 Gemini Proofing] Proofing error, fallback to candidate filter: $e');
+          // If offline / network timeout, fallback to filtered Stage 1 edge detections
+          proofedDetections = stage1Candidates.where((c) => c.score >= 0.55).toList();
         }
       }
     } catch (e) {
-      debugPrint('[Vision 2-Layer] Frame capture error: $e');
+      debugPrint('[Vision Pipeline] Frame capture error: $e');
     }
 
-    // --- 2-LAYER FUSION & RISK ASSESSMENT ---
-    // Merge Layer 1 (instant edge) + Layer 2 (semantic cloud), deduplicating overlapping boxes
-    final Map<String, DetectedObstacle> mergedMap = {};
-    for (var o in layer1Detections) {
-      final key = '${o.label}_${(o.x * 10).toInt()}_${(o.y * 10).toInt()}';
-      mergedMap[key] = o;
-    }
-    for (var o in layer2Detections) {
-      final key = '${o.label}_${(o.x * 10).toInt()}_${(o.y * 10).toInt()}';
-      mergedMap[key] = o;
-    }
-
-    final List<DetectedObstacle> unifiedDetections = mergedMap.values.toList();
-
+    // =========================================================================
+    // 🎯 STAGE 3: Verified Output Generation & Accessibility Risk Assessment
+    // =========================================================================
     const profile = 'visual';
     final List<DetectedObstacle> verifiedObstacles = [];
     double maxProximity = 0.0;
     List<String> warningsList = [];
 
-    for (var obs in unifiedDetections) {
+    for (var obs in proofedDetections) {
       final assessment = AccessibilityRiskEngine.assess(obs, profile);
       verifiedObstacles.add(obs);
 

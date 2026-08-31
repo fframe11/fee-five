@@ -483,73 +483,93 @@ def analyze_image(payload: VisionRequest):
     import json
     
     load_env()
-    api_key = os.environ.get("Groq_api") or os.environ.get("GROQ_API_KEY")
-    if not api_key:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Groq API key not found in .env file. Please check your workspace configuration."
-        )
-        
     prompt = payload.prompt or "คุณคือผู้ช่วยคนตาบอด อธิบายภาพถ่ายนี้และเตือนสิ่งกีดขวางเป็นภาษาไทยสั้นๆ 1 ประโยค"
     
-    # Ensure correct Base64 Data URL format prefix
+    # Ensure correct Base64 clean string
     img_data = payload.image_base64
-    if not img_data.startswith("data:image"):
-        img_clean = "".join(img_data.split())
-        img_data = f"data:image/jpeg;base64,{img_clean}"
-        
-    url = "https://api.groq.com/openai/v1/chat/completions"
-    headers = {
-        "Authorization": f"Bearer {api_key}",
-        "Content-Type": "application/json",
-    }
-    body = {
-        "model": "qwen/qwen3.8-27b",
-        "messages": [
-            {
-                "role": "user",
-                "content": [
-                    {
-                        "type": "text",
-                        "text": prompt
-                    },
-                    {
-                        "type": "image_url",
-                        "image_url": {
-                            "url": img_data
-                        }
-                    }
-                ]
-            }
-        ],
-        "temperature": 0.1
-    }
+    if img_data.startswith("data:image"):
+        raw_b64 = img_data.split(",", 1)[1] if "," in img_data else img_data
+    else:
+        raw_b64 = "".join(img_data.split())
     
-    try:
-        resp = requests.post(url, headers=headers, json=body, timeout=12)
-        if resp.status_code != 200:
-            print(f"Groq API Error ({resp.status_code}): {resp.text}")
-            raise HTTPException(status_code=resp.status_code, detail=f"Groq API Error: {resp.text}")
+    data_url = f"data:image/jpeg;base64,{raw_b64}"
+    
+    # ─── PROVIDER 1: Google Gemini Vision API ───
+    gemini_key = os.environ.get("GOOGLE_API_KEY") or os.environ.get("gemini_api")
+    if gemini_key:
+        try:
+            for gemini_model in ["gemini-2.5-flash", "gemini-1.5-flash", "gemini-2.0-flash"]:
+                gemini_url = f"https://generativelanguage.googleapis.com/v1beta/models/{gemini_model}:generateContent?key={gemini_key}"
+                body = {
+                    "contents": [
+                        {
+                            "parts": [
+                                {"text": prompt},
+                                {"inline_data": {"mime_type": "image/jpeg", "data": raw_b64}}
+                            ]
+                        }
+                    ],
+                    "generationConfig": {
+                        "temperature": 0.1
+                    }
+                }
+                resp = requests.post(gemini_url, json=body, timeout=10)
+                if resp.status_code == 200:
+                    res_json = resp.json()
+                    candidates = res_json.get("candidates", [])
+                    if candidates and "content" in candidates[0] and "parts" in candidates[0]["content"]:
+                        description = candidates[0]["content"]["parts"][0].get("text", "")
+                        description = re.sub(r'<think>.*?</think>', '', description, flags=re.DOTALL).strip()
+                        if '```json' in description:
+                            description = description.split('```json')[1].split('```')[0].strip()
+                        elif '```' in description:
+                            description = description.split('```')[1].split('```')[0].strip()
+                        if description:
+                            return {"description": description, "provider": "gemini"}
+        except Exception as e:
+            print(f"[Vision Engine] Gemini fallback trigger: {e}")
             
-        res_json = resp.json()
-        description = res_json["choices"][0]["message"]["content"]
-        # Strip <think>...</think> tags if model produces reasoning thoughts
-        description = re.sub(r'<think>.*?</think>', '', description, flags=re.DOTALL).strip()
-        # Strip markdown ```json ... ``` codeblocks if present
-        if '```json' in description:
-            description = description.split('```json')[1].split('```')[0].strip()
-        elif '```' in description:
-            description = description.split('```')[1].split('```')[0].strip()
-        return {"description": description}
-    except requests.exceptions.RequestException as e:
-        print(f"Groq Request Exception: {e}")
-        raise HTTPException(status_code=500, detail=f"Vision API Request failed: {str(e)}")
-    except Exception as e:
-        print(f"Vision analysis failed: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Vision server error: {str(e)}"
-        )
+    # ─── PROVIDER 2: Groq Vision AI (Qwen / GPT-OSS) ───
+    groq_key = os.environ.get("Groq_api") or os.environ.get("GROQ_API_KEY")
+    if groq_key:
+        try:
+            url = "https://api.groq.com/openai/v1/chat/completions"
+            headers = {
+                "Authorization": f"Bearer {groq_key}",
+                "Content-Type": "application/json",
+            }
+            body = {
+                "model": "qwen/qwen3.8-27b",
+                "messages": [
+                    {
+                        "role": "user",
+                        "content": [
+                            {"type": "text", "text": prompt},
+                            {"type": "image_url", "image_url": {"url": data_url}}
+                        ]
+                    }
+                ],
+                "temperature": 0.1
+            }
+            resp = requests.post(url, headers=headers, json=body, timeout=12)
+            if resp.status_code == 200:
+                res_json = resp.json()
+                description = res_json["choices"][0]["message"]["content"]
+                description = re.sub(r'<think>.*?</think>', '', description, flags=re.DOTALL).strip()
+                if '```json' in description:
+                    description = description.split('```json')[1].split('```')[0].strip()
+                elif '```' in description:
+                    description = description.split('```')[1].split('```')[0].strip()
+                return {"description": description, "provider": "groq"}
+            else:
+                print(f"[Vision Engine] Groq error ({resp.status_code}): {resp.text}")
+        except Exception as e:
+            print(f"[Vision Engine] Groq Exception: {e}")
+
+    raise HTTPException(
+        status_code=500,
+        detail="Vision AI proofing failed across all providers (Gemini & Groq)."
+    )
 
 
 @app.get("/api/v1/places/search")
