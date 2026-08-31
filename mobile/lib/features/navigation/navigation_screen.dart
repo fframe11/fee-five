@@ -20,6 +20,7 @@ import '../../core/services/recovery_manager.dart';
 import '../../core/services/battery_manager.dart';
 import '../../core/services/place_search_service.dart';
 import '../../core/services/osrm_routing_service.dart';
+import '../../core/services/gis_data_service.dart';
 import 'map_loader.dart';
 
 class NavigationScreen extends ConsumerStatefulWidget {
@@ -51,10 +52,15 @@ class _NavigationScreenState extends ConsumerState<NavigationScreen> with Ticker
   
   bool _filterElevators = true;
   bool _filterRamps = true;
-  bool _filterTactilePaths = false;
+  bool _filterTactilePaths = true;
+  bool _filterTransit = true;
+  bool _filterBus = true;
+  bool _filterBarriers = true;
 
   List<dynamic> _gisPoints = [];
   List<dynamic> _gisBarriers = [];
+  List<Map<String, dynamic>> _transitStations = [];
+  List<Map<String, dynamic>> _busStops = [];
 
   late AnimationController _pulseController;
   late Animation<double> _pulseAnimation;
@@ -264,13 +270,38 @@ class _NavigationScreenState extends ConsumerState<NavigationScreen> with Ticker
   }
 
   Future<void> _loadAccessibilityGISLayer() async {
+    // 1. Instantly load comprehensive Master GIS dataset (BTS/MRT, Bus, Elevators, Ramps, Barriers)
+    setState(() {
+      _gisPoints = List.from(GisDataService.realAccessibilityPoints);
+      _gisBarriers = List.from(GisDataService.realBarriers);
+      _transitStations = List.from(GisDataService.realTransitStations);
+      _busStops = List.from(GisDataService.realBusStops);
+    });
+
+    // 2. Fetch live updates from Backend API if available
     try {
       final points = await ApiClient().getAccessibilityPoints();
       final barriers = await ApiClient().getActiveBarriers();
-      if (mounted) {
+      if (mounted && points.isNotEmpty) {
         setState(() {
-          _gisPoints = points;
-          _gisBarriers = barriers;
+          final existingIds = _gisPoints.map((p) => p['id']?.toString() ?? '').toSet();
+          for (final pt in points) {
+            final id = pt['id']?.toString() ?? '';
+            if (id.isEmpty || !existingIds.contains(id)) {
+              _gisPoints.add(pt);
+            }
+          }
+        });
+      }
+      if (mounted && barriers.isNotEmpty) {
+        setState(() {
+          final existingBarrierIds = _gisBarriers.map((b) => b['id']?.toString() ?? '').toSet();
+          for (final bar in barriers) {
+            final id = bar['id']?.toString() ?? '';
+            if (id.isEmpty || !existingBarrierIds.contains(id)) {
+              _gisBarriers.add(bar);
+            }
+          }
         });
       }
     } catch (_) {}
@@ -744,6 +775,7 @@ class _NavigationScreenState extends ConsumerState<NavigationScreen> with Ticker
                       ),
                     MarkerLayer(
                       markers: [
+                        ..._buildGisMarkers(acc, isHighContrast),
                         // User Current GPS Location Marker
                         Marker(
                           point: ll.LatLng(userLat, userLng),
@@ -1545,28 +1577,34 @@ class _NavigationScreenState extends ConsumerState<NavigationScreen> with Ticker
             ),
 
           // Map Filter Options Toolbar (Chips)
-          if (_isNavigating)
-            Positioned(
-              bottom: 24.0,
-              left: 16.0,
-              right: 84.0,
-              child: MouseRegion(
-                onEnter: (_) => toggleMapIframeClickable(false),
-                onExit: (_) => toggleMapIframeClickable(true),
-                child: SingleChildScrollView(
-                  scrollDirection: Axis.horizontal,
-                  child: Row(
-                    children: [
-                      _buildFilterChip('ลิฟต์', Icons.elevator_rounded, _filterElevators, (val) => setState(() => _filterElevators = val), primaryColor, isHighContrast, acc),
-                      const SizedBox(width: 8),
-                      _buildFilterChip('ทางลาด', Icons.accessible_rounded, _filterRamps, (val) => setState(() => _filterRamps = val), Colors.teal[800]!, isHighContrast, acc),
-                      const SizedBox(width: 8),
-                      _buildFilterChip('ทางนำสายตา', Icons.alt_route_rounded, _filterTactilePaths, (val) => setState(() => _filterTactilePaths = val), Colors.amber[800]!, isHighContrast, acc),
-                    ],
-                  ),
+          // GIS Accessibility Layer Filter Chips (Visible at bottom of map)
+          Positioned(
+            bottom: 14.0,
+            left: 16.0,
+            right: 84.0,
+            child: MouseRegion(
+              onEnter: (_) => toggleMapIframeClickable(false),
+              onExit: (_) => toggleMapIframeClickable(true),
+              child: SingleChildScrollView(
+                scrollDirection: Axis.horizontal,
+                child: Row(
+                  children: [
+                    _buildFilterChip('BTS / MRT (${_transitStations.length})', Icons.directions_subway_rounded, _filterTransit, (val) => setState(() => _filterTransit = val), const Color(0xFF1E3A8A), isHighContrast, acc),
+                    const SizedBox(width: 8),
+                    _buildFilterChip('ป้ายรถเมล์ (${_busStops.length})', Icons.directions_bus_rounded, _filterBus, (val) => setState(() => _filterBus = val), Colors.teal[800]!, isHighContrast, acc),
+                    const SizedBox(width: 8),
+                    _buildFilterChip('ลิฟต์', Icons.elevator_rounded, _filterElevators, (val) => setState(() => _filterElevators = val), primaryColor, isHighContrast, acc),
+                    const SizedBox(width: 8),
+                    _buildFilterChip('ทางลาด', Icons.accessible_rounded, _filterRamps, (val) => setState(() => _filterRamps = val), Colors.green[700]!, isHighContrast, acc),
+                    const SizedBox(width: 8),
+                    _buildFilterChip('ทางนำสายตา', Icons.alt_route_rounded, _filterTactilePaths, (val) => setState(() => _filterTactilePaths = val), Colors.amber[800]!, isHighContrast, acc),
+                    const SizedBox(width: 8),
+                    _buildFilterChip('⚠️ สิ่งกีดขวาง (${_gisBarriers.length})', Icons.warning_amber_rounded, _filterBarriers, (val) => setState(() => _filterBarriers = val), Colors.red[800]!, isHighContrast, acc),
+                  ],
                 ),
               ),
             ),
+          ),
 
           // Reroute Alert Dialog Simulator Overlay
           if (_showRerouteAlert)
@@ -2007,6 +2045,389 @@ class _NavigationScreenState extends ConsumerState<NavigationScreen> with Ticker
       isOrigin ? Icons.my_location_rounded : Icons.place_rounded,
       color: isOrigin ? Colors.green : Colors.red,
       size: 20,
+    );
+  }
+
+  // ─── GIS Layer: Interactive Bangkok & Korat Accessibility Markers ───
+  List<Marker> _buildGisMarkers(AccessibilityState acc, bool isHighContrast) {
+    final List<Marker> markers = [];
+
+    // 1. REAL BTS / MRT STATIONS
+    if (_filterTransit) {
+      for (final st in _transitStations) {
+        final double? lat = (st['lat'] as num?)?.toDouble();
+        final double? lon = (st['lon'] as num?)?.toDouble();
+        if (lat == null || lon == null) continue;
+
+        final isBts = (st['category'] == 'bts') || (st['id']?.toString().startsWith('bts_') ?? false);
+        final color = isBts ? const Color(0xFF008080) : const Color(0xFF1E3A8A);
+
+        markers.add(
+          Marker(
+            point: ll.LatLng(lat, lon),
+            width: 140,
+            height: 52,
+            alignment: Alignment.center,
+            child: GestureDetector(
+              onTap: () {
+                _showGisDetailModal(
+                  title: st['name'] ?? 'สถานีรถไฟฟ้า',
+                  subtitle: st['line'] ?? 'ขนส่งมวลชนระบบราง',
+                  category: isBts ? 'BTS Skytrain' : 'MRT Subway',
+                  icon: isBts ? Icons.directions_subway_rounded : Icons.train_rounded,
+                  iconColor: color,
+                  details: [
+                    '🛗 ลิฟต์คนพิการ: ${st['has_elevator'] == true ? 'มี (ใช้งานได้ปกติ)' : 'ไม่มี'}',
+                    '♿ ทางลาดมาตรฐาน: ${st['has_ramp'] == true ? 'มี' : 'ไม่มี'}',
+                    '🦯 ทางนำสายตา (Tactile): ${st['has_tactile'] == true ? 'มีตลอดชานชาลา' : 'ไม่มี'}',
+                  ],
+                  targetLat: lat,
+                  targetLon: lon,
+                );
+              },
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                    decoration: BoxDecoration(
+                      color: color,
+                      borderRadius: BorderRadius.circular(6),
+                      border: Border.all(color: Colors.white, width: 1.2),
+                      boxShadow: const [BoxShadow(color: Colors.black38, blurRadius: 3)],
+                    ),
+                    child: Text(
+                      st['name']?.toString().replaceAll(' (CEN - สถานีกลาง)', '').replaceAll(' (N8)', '').replaceAll(' (E4 / เชื่อม MRT สุขุมวิท)', '') ?? 'BTS/MRT',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(color: Colors.white, fontSize: 9.5, fontWeight: FontWeight.bold),
+                    ),
+                  ),
+                  Icon(Icons.directions_subway_rounded, color: color, size: 22),
+                ],
+              ),
+            ),
+          ),
+        );
+      }
+    }
+
+    // 2. REAL BUS STOPS
+    if (_filterBus) {
+      for (final bus in _busStops) {
+        final double? lat = (bus['lat'] as num?)?.toDouble();
+        final double? lon = (bus['lon'] as num?)?.toDouble();
+        if (lat == null || lon == null) continue;
+
+        markers.add(
+          Marker(
+            point: ll.LatLng(lat, lon),
+            width: 130,
+            height: 48,
+            alignment: Alignment.center,
+            child: GestureDetector(
+              onTap: () {
+                _showGisDetailModal(
+                  title: bus['name'] ?? 'ป้ายรถประจำทาง',
+                  subtitle: bus['lines'] ?? 'สายรถเมล์ที่ผ่าน',
+                  category: 'ป้ายรถเมล์ ขสมก.',
+                  icon: Icons.directions_bus_rounded,
+                  iconColor: Colors.teal[800]!,
+                  details: [
+                    '🚌 สายรถเมล์: ${bus['lines'] ?? 'สายหลัก'}',
+                    '♿ ชานชาลารถเมล์ชานต่ำ (Low-Floor Bus Compatible)',
+                  ],
+                  targetLat: lat,
+                  targetLon: lon,
+                );
+              },
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
+                    decoration: BoxDecoration(
+                      color: Colors.teal[800],
+                      borderRadius: BorderRadius.circular(6),
+                      border: Border.all(color: Colors.white, width: 1),
+                      boxShadow: const [BoxShadow(color: Colors.black38, blurRadius: 3)],
+                    ),
+                    child: Text(
+                      bus['name']?.toString().replaceAll('ป้ายรถเมล์ ', '') ?? 'ป้ายรถเมล์',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(color: Colors.white, fontSize: 9, fontWeight: FontWeight.bold),
+                    ),
+                  ),
+                  Icon(Icons.directions_bus_rounded, color: Colors.teal[800], size: 20),
+                ],
+              ),
+            ),
+          ),
+        );
+      }
+    }
+
+    // 3. ACCESSIBILITY POINTS (Elevators, Ramps, Tactile Paving)
+    for (final pt in _gisPoints) {
+      final type = pt['type']?.toString().toLowerCase() ?? '';
+      if (type == 'elevator' && !_filterElevators) continue;
+      if (type == 'ramp' && !_filterRamps) continue;
+      if (type == 'tactile' && !_filterTactilePaths) continue;
+
+      double? lat = (pt['lat'] as num?)?.toDouble();
+      double? lon = (pt['lon'] as num?)?.toDouble();
+      if (lat == null && pt['location'] is Map) {
+        lat = (pt['location']['latitude'] as num?)?.toDouble();
+        lon = (pt['location']['longitude'] as num?)?.toDouble();
+      }
+      if (lat == null || lon == null) continue;
+
+      IconData iconData = Icons.elevator_rounded;
+      Color markerColor = Colors.purple;
+      String typeLabel = 'ลิฟต์คนพิการ';
+
+      if (type == 'ramp') {
+        iconData = Icons.accessible_rounded;
+        markerColor = Colors.green[700]!;
+        typeLabel = 'ทางลาดมาตรฐาน';
+      } else if (type == 'tactile') {
+        iconData = Icons.alt_route_rounded;
+        markerColor = Colors.amber[800]!;
+        typeLabel = 'ทางนำสายตา (Tactile)';
+      }
+
+      final double finalLat = lat;
+      final double finalLon = lon;
+
+      markers.add(
+        Marker(
+          point: ll.LatLng(finalLat, finalLon),
+          width: 32,
+          height: 32,
+          alignment: Alignment.center,
+          child: GestureDetector(
+            onTap: () {
+              _showGisDetailModal(
+                title: pt['name'] ?? 'จุดอำนวยความสะดวก ($typeLabel)',
+                subtitle: pt['detail'] ?? 'เปิดให้บริการปกติ',
+                category: typeLabel,
+                icon: iconData,
+                iconColor: markerColor,
+                details: [
+                  '📍 สถานะ: ${pt['status'] == 'operational' ? 'ใช้งานได้ปกติ 100%' : 'เปิดบริการ'}',
+                  'ℹ️ ข้อมูล: ${pt['detail'] ?? 'สิ่งอำนวยความสะดวกสำหรับผู้พิการ'}',
+                ],
+                targetLat: finalLat,
+                targetLon: finalLon,
+              );
+            },
+            child: Container(
+              decoration: BoxDecoration(
+                color: markerColor,
+                shape: BoxShape.circle,
+                border: Border.all(color: Colors.white, width: 2),
+                boxShadow: const [BoxShadow(color: Colors.black38, blurRadius: 4)],
+              ),
+              child: Icon(iconData, color: Colors.white, size: 18),
+            ),
+          ),
+        ),
+      );
+    }
+
+    // 4. REALISTIC ROAD & SIDEWALK BARRIERS
+    if (_filterBarriers) {
+      for (final bar in _gisBarriers) {
+        double? lat = (bar['lat'] as num?)?.toDouble();
+        double? lon = (bar['lon'] as num?)?.toDouble();
+        if (lat == null && bar['location'] is Map) {
+          lat = (bar['location']['latitude'] as num?)?.toDouble();
+          lon = (bar['location']['longitude'] as num?)?.toDouble();
+        }
+        if (lat == null || lon == null) continue;
+
+        final double finalBarLat = lat;
+        final double finalBarLon = lon;
+        final sev = bar['severity']?.toString() ?? 'medium';
+        final isHigh = sev == 'high';
+
+        markers.add(
+          Marker(
+            point: ll.LatLng(finalBarLat, finalBarLon),
+            width: 140,
+            height: 56,
+            alignment: Alignment.center,
+            child: GestureDetector(
+              onTap: () {
+                _showGisDetailModal(
+                  title: bar['name'] ?? '⚠️ สิ่งกีดขวางบนเส้นทาง',
+                  subtitle: bar['severity_text'] ?? 'ระดับความเสี่ยง: $sev',
+                  category: 'สิ่งกีดขวาง (Hazard)',
+                  icon: Icons.warning_amber_rounded,
+                  iconColor: Colors.red[800]!,
+                  details: [
+                    '⚠️ ระดับความเสี่ยง: ${bar['severity_text'] ?? (isHigh ? 'อันตรายสูง' : 'ปานกลาง')}',
+                    '🛡️ คำแนะนำ: ${bar['instruction'] ?? bar['description'] ?? 'กรุณาระมัดระวังเป็นพิเศษ'}',
+                  ],
+                  targetLat: finalBarLat,
+                  targetLon: finalBarLon,
+                  isHazard: true,
+                );
+              },
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
+                    decoration: BoxDecoration(
+                      color: isHigh ? Colors.red[900] : Colors.orange[900],
+                      borderRadius: BorderRadius.circular(6),
+                      border: Border.all(color: Colors.white, width: 1.2),
+                      boxShadow: const [BoxShadow(color: Colors.black38, blurRadius: 4)],
+                    ),
+                    child: Text(
+                      '⚠️ ${bar['name']?.toString().split('(').first.trim() ?? 'สิ่งกีดขวาง'}',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(color: Colors.white, fontSize: 8.5, fontWeight: FontWeight.bold),
+                    ),
+                  ),
+                  Icon(Icons.warning_amber_rounded, color: isHigh ? Colors.red[700] : Colors.orange[700], size: 24),
+                ],
+              ),
+            ),
+          ),
+        );
+      }
+    }
+
+    return markers;
+  }
+
+  void _showGisDetailModal({
+    required String title,
+    required String subtitle,
+    required String category,
+    required IconData icon,
+    required Color iconColor,
+    required List<String> details,
+    required double targetLat,
+    required double targetLon,
+    bool isHazard = false,
+  }) {
+    final acc = ref.read(accessibilityProvider);
+    final isHighContrast = acc.highContrast;
+
+    // Announce via voice
+    announceSpeech('$category: $title. $subtitle', acc.voiceEnabled);
+
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: isHighContrast ? Colors.black : Colors.white,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(16),
+          side: isHighContrast ? const BorderSide(color: Colors.white, width: 2) : BorderSide.none,
+        ),
+        title: Row(
+          children: [
+            Container(
+              padding: const EdgeInsets.all(8),
+              decoration: BoxDecoration(
+                color: iconColor.withOpacity(0.15),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: Icon(icon, color: iconColor, size: 28),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                    decoration: BoxDecoration(
+                      color: isHazard ? Colors.red[100] : Colors.blue[50],
+                      borderRadius: BorderRadius.circular(4),
+                    ),
+                    child: Text(
+                      category,
+                      style: TextStyle(
+                        fontSize: 10,
+                        fontWeight: FontWeight.bold,
+                        color: isHazard ? Colors.red[900] : Colors.blue[900],
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    title,
+                    style: TextStyle(
+                      fontSize: 15 * acc.fontScale,
+                      fontWeight: FontWeight.bold,
+                      color: isHighContrast ? Colors.white : Colors.black87,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              subtitle,
+              style: TextStyle(
+                fontSize: 13 * acc.fontScale,
+                fontWeight: FontWeight.w600,
+                color: isHighContrast ? Colors.cyanAccent : Colors.grey[800],
+              ),
+            ),
+            const Divider(height: 20),
+            ...details.map(
+              (d) => Padding(
+                padding: const EdgeInsets.symmetric(vertical: 3.0),
+                child: Text(
+                  d,
+                  style: TextStyle(
+                    fontSize: 12 * acc.fontScale,
+                    color: isHighContrast ? Colors.white70 : Colors.black87,
+                    height: 1.3,
+                  ),
+                ),
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(),
+            child: Text('ปิด', style: TextStyle(color: isHighContrast ? Colors.white : Colors.grey[700])),
+          ),
+          if (!isHazard)
+            ElevatedButton.icon(
+              icon: const Icon(Icons.navigation_rounded, size: 18),
+              label: const Text('นำทางมาที่นี่'),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: isHighContrast ? Colors.yellowAccent : const Color(0xFF4F46E5),
+                foregroundColor: isHighContrast ? Colors.black : Colors.white,
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+              ),
+              onPressed: () {
+                Navigator.of(ctx).pop();
+                setState(() {
+                  _destController.text = title;
+                  _customDestLat = targetLat;
+                  _customDestLng = targetLon;
+                });
+                _startNavigation();
+              },
+            ),
+        ],
+      ),
     );
   }
 }
