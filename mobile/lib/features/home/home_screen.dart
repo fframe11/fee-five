@@ -267,10 +267,11 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
               ),
             ),
 
-          // Persistent Floating Mic Button Overlay (accessible across all screens)
-          Positioned(
-            right: 16,
-            bottom: kBottomNavigationBarHeight + 16,
+          // Persistent Floating Mic Button Overlay (accessible across screens except Vision camera tab)
+          if (activeTabs[_currentIndex].id != 1)
+            Positioned(
+              right: 16,
+              bottom: kBottomNavigationBarHeight + 16,
             child: Semantics(
               button: true,
               label: _isLiveVoiceActive ? 'ปิดระบบสั่งการด้วยเสียง' : 'เปิดระบบสั่งการด้วยเสียงแบบไลฟ์',

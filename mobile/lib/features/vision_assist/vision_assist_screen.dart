@@ -54,14 +54,14 @@ class DetectedObstacle {
           p0 /= 1000.0; p1 /= 1000.0; p2 /= 1000.0; p3 /= 1000.0;
         }
 
-        // Standard [xmin, ymin, xmax, ymax]
-        final double minX = math.min(p0, p2);
-        final double maxX = math.max(p0, p2);
-        final double minY = math.min(p1, p3);
-        final double maxY = math.max(p1, p3);
+        // Qwen vision format: [ymin, xmin, ymax, xmax] or standard [xmin, ymin, xmax, ymax]
+        final double minY = math.min(p0, p2).clamp(0.0, 1.0);
+        final double maxY = math.max(p0, p2).clamp(0.0, 1.0);
+        final double minX = math.min(p1, p3).clamp(0.0, 1.0);
+        final double maxX = math.max(p1, p3).clamp(0.0, 1.0);
 
-        xVal = minX.clamp(0.0, 1.0);
-        yVal = minY.clamp(0.0, 1.0);
+        xVal = minX;
+        yVal = minY;
         wVal = (maxX - minX).clamp(0.05, 1.0);
         hVal = (maxY - minY).clamp(0.05, 1.0);
       }
@@ -249,11 +249,20 @@ class _VisionAssistScreenState extends ConsumerState<VisionAssistScreen> with Ti
     List<DetectedObstacle> layer2Detections = [];
 
     try {
-      if (_cameraController != null && _cameraController!.value.isInitialized) {
-        final xFile = await _cameraController!.takePicture();
-        final bytes = await xFile.readAsBytes();
-        final base64Img = base64Encode(bytes);
+      String? base64Img = captureFrame();
+      if (base64Img == null || base64Img.isEmpty) {
+        if (_cameraController != null && _cameraController!.value.isInitialized) {
+          try {
+            final xFile = await _cameraController!.takePicture();
+            final bytes = await xFile.readAsBytes();
+            base64Img = base64Encode(bytes);
+          } catch (e) {
+            debugPrint('[Camera] Take picture error: $e');
+          }
+        }
+      }
 
+      if (base64Img != null && base64Img.isNotEmpty) {
         // --- LAYER 1: Fast On-Device YOLO / TFLite Inference ---
         try {
           final tfliteResults = await _tfliteService.detectOnBase64(base64Img);
@@ -271,13 +280,10 @@ class _VisionAssistScreenState extends ConsumerState<VisionAssistScreen> with Ti
           final description = await ApiClient().analyzeVisionImage(
             base64Img,
             prompt: 'You are an objective computer vision obstacle detector for visually impaired pedestrian navigation.\n'
-                'Analyze this camera image and accurately detect ONLY real, physical, and hazardous obstacles directly on or near the walking path (such as pole, stairs, pothole, curb, barrier, chair, table, vehicle, pedestrian, uneven ground).\n'
-                'CRITICAL RULES:\n'
-                '- Do NOT detect standard background structures (e.g. plain walls, ceilings, floors) or small wall attachments (e.g. power sockets, switches) unless they pose a direct physical collision hazard.\n'
-                '- If the path is clear and no actual hazards are present, return an empty JSON array: [].\n'
+                'Analyze this camera image and accurately detect physical structures and obstacles (such as window, door, pillar, wall, pole, stairs, pothole, curb, barrier, chair, table, vehicle, pedestrian, uneven ground, sign, cctv, sticker).\n'
                 'Return ONLY a valid JSON array of objects without extra commentary:\n'
-                '[{"label": "pole", "score": 0.95, "bbox_2d": [xmin, ymin, xmax, ymax]}]\n'
-                'where coordinates are normalized 0 to 1000.',
+                '[{"label": "pillar", "score": 0.95, "bbox_2d": [ymin, xmin, ymax, xmax]}]\n'
+                'where coordinates are normalized 0 to 1000. If no objects are found, return [].',
           ).timeout(const Duration(seconds: 10));
 
           String jsonStr = description.trim();
@@ -564,6 +570,17 @@ class _VisionAssistScreenState extends ConsumerState<VisionAssistScreen> with Ti
       case 'plant':
       case 'tree':
         return 'ต้นไม้ / กระถางต้นไม้';
+      case 'window':
+      case 'glass':
+        return 'หน้าต่างกระจก';
+      case 'sticker':
+        return 'สติกเกอร์ / ป้ายสัญลักษณ์';
+      case 'sign':
+      case 'signboard':
+        return 'ป้ายข้อความ / ป้ายบอกทาง';
+      case 'cctv':
+      case 'camera':
+        return 'กล้องวงจรปิด';
       default:
         return label;
     }
@@ -899,7 +916,7 @@ class _VisionAssistScreenState extends ConsumerState<VisionAssistScreen> with Ti
                   Positioned(
                     left: 16,
                     right: 16,
-                    bottom: 80,
+                    bottom: 115,
                     child: Column(
                       mainAxisSize: MainAxisSize.min,
                       children: [
@@ -959,15 +976,21 @@ class _VisionAssistScreenState extends ConsumerState<VisionAssistScreen> with Ti
                               ),
                             ),
 
-                          // Warning Card
+                          // Dynamic Color Warning Card (Green for Safe, Amber/Red for Hazards)
                           Card(
-                            color: isHighContrast ? Colors.black : Colors.red[900]?.withOpacity(0.9),
+                            color: isHighContrast
+                                ? Colors.black
+                                : (_obstacles.isEmpty
+                                    ? Colors.green[800]?.withOpacity(0.92)
+                                    : (_obstacles.any((o) => const {'pillar', 'pole', 'column', 'stairs', 'pothole', 'hole', 'barrier', 'curb', 'car', 'motorcycle'}.contains(o.label.toLowerCase().trim()))
+                                        ? (_simulatedProximity >= 0.5 ? Colors.red[900]?.withOpacity(0.92) : Colors.deepOrange[800]?.withOpacity(0.92))
+                                        : Colors.teal[800]?.withOpacity(0.92))),
                             shape: RoundedRectangleBorder(
                               borderRadius: BorderRadius.circular(12),
                               side: isHighContrast ? const BorderSide(color: Colors.white, width: 2) : BorderSide.none,
                             ),
                             child: Padding(
-                              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+                              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
                               child: Text(
                                 _getWarningText(),
                                 textAlign: TextAlign.center,
