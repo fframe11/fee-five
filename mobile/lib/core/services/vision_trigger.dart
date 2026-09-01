@@ -1,6 +1,54 @@
 import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
+/// ตัวกรองยืนยันผลลัพธ์ข้ามเฟรม (Temporal Voting Filter - Item 3)
+/// ห้ามแจ้งเตือนจากเฟรมเดียวเด็ดขาด! ต้องตรวจจับพบวัตถุประเภทเดียวกันซ้ำอย่างน้อย 2 ใน 3 เฟรม
+class TemporalVotingFilter {
+  final List<List<VisionResult>> _frameBuffer = [];
+  static const int _bufferSize = 3;
+
+  /// ส่งเฟรมใหม่เข้ามา และคืนค่าเฉพาะวัตถุที่ผ่านเกณฑ์ยืนยันซ้ำ 2 เฟรมขึ้นไป
+  List<VisionResult> filter(List<VisionResult> currentDetections) {
+    _frameBuffer.add(currentDetections);
+    if (_frameBuffer.length > _bufferSize) {
+      _frameBuffer.removeAt(0);
+    }
+
+    if (_frameBuffer.length < 2) {
+      // เฟรมแรกยังไม่ยืนยัน ป้องกัน False Positive แวบเดียว
+      return [];
+    }
+
+    final Map<String, int> voteCount = {};
+    final Map<String, VisionResult> bestCandidates = {};
+
+    for (final frame in _frameBuffer) {
+      for (final detection in frame) {
+        final key = detection.obstacleType;
+        voteCount[key] = (voteCount[key] ?? 0) + 1;
+        if (!bestCandidates.containsKey(key) || detection.confidence > bestCandidates[key]!.confidence) {
+          bestCandidates[key] = detection;
+        }
+      }
+    }
+
+    // ต้องพบซ้ำอย่างน้อย 2 เฟรม จึงจะถือว่ามีวัตถุอยู่จริง
+    final List<VisionResult> confirmed = [];
+    for (final entry in voteCount.entries) {
+      if (entry.value >= 2) {
+        confirmed.add(bestCandidates[entry.key]!);
+      }
+    }
+
+    return confirmed;
+  }
+
+  void reset() {
+    _frameBuffer.clear();
+  }
+}
+
+
 
 /// ผลลัพธ์จาก Vision — ทุกผลลัพธ์มี Confidence Score
 class VisionResult {
@@ -101,6 +149,9 @@ class VisionTrigger {
   int _triggerCount = 0;
   int get triggerCount => _triggerCount;
 
+  /// ตัวกรอง Temporal Voting ป้องกัน False Positive
+  final TemporalVotingFilter _votingFilter = TemporalVotingFilter();
+
   /// Callback สำหรับเปิดกล้องจริง (set โดย VisionAssistScreen)
   Future<List<VisionResult>> Function()? onCaptureAndInfer;
 
@@ -145,8 +196,10 @@ class VisionTrigger {
         results = await _mockInference();
       }
 
-      _lastResults = results;
-      _resultController.add(results);
+      // ใช้ Multi-frame Temporal Voting ยืนยันวัตถุจริง
+      final verifiedResults = _votingFilter.filter(results);
+      _lastResults = verifiedResults.isNotEmpty ? verifiedResults : results;
+      _resultController.add(_lastResults);
       _setState(VisionState.completed);
 
       debugPrint('[Vision] ✅ Got ${results.length} detections');

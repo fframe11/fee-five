@@ -539,6 +539,20 @@ YOUR TASK (STAGE 2 PROOFING & REFINEMENT):
 
   String _getThaiLabel(String label) {
     switch (label.toLowerCase().trim()) {
+      case 'broken_footpath':
+        return 'ทางเท้าชำรุด';
+      case 'footpath':
+        return 'ทางเท้า';
+      case 'obstacle':
+        return 'สิ่งกีดขวาง';
+      case 'tactile_paving':
+        return 'ทางสัมผัสเบรลล์บล็อก';
+      case 'traffic_light_green':
+        return 'สัญญาณไฟเขียว ข้ามได้';
+      case 'traffic_light_red':
+        return 'สัญญาณไฟแดง หยุดรอ';
+      case 'zebra_crossing':
+        return 'ทางม้าลาย';
       case 'pillar':
       case 'pole':
       case 'column':

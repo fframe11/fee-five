@@ -15,7 +15,8 @@ import '../../core/api_client.dart';
 import '../../core/tts_helper.dart';
 import '../../core/app_colors.dart';
 import '../../core/services/background_navigation_service.dart';
-import '../../core/services/risk_engine.dart' show RiskState;
+import '../../core/services/risk_engine.dart';
+import '../../core/services/vision_trigger.dart';
 import '../../core/services/recovery_manager.dart';
 import '../../core/services/battery_manager.dart';
 import '../../core/services/place_search_service.dart';
@@ -44,6 +45,10 @@ class _NavigationScreenState extends ConsumerState<NavigationScreen> with Ticker
   bool _showRerouteAlert = false;
   int _selectedRouteIndex = 0; // 0 = Safe Route, 1 = Shortest Unsafe Route
   String _currentTravelMode = 'walk'; // 'walk' or 'transit'
+  String _mapThemeStyle = 'guardian_cyber'; // 'guardian_cyber', 'minimal_slate', 'midnight_neon', 'traffic', 'satellite'
+  bool _voiceOnlyMode = false;
+  final Set<String> _announcedHazards = {};
+  String? _lastHazardAlert;
   
   Timer? _navigationTimer;
   int _currentStepIndex = 0;
@@ -54,6 +59,8 @@ class _NavigationScreenState extends ConsumerState<NavigationScreen> with Ticker
   bool _filterElevators = true;
   bool _filterRamps = true;
   bool _filterTactilePaths = true;
+  bool _filterTrafficLights = true;
+  bool _filterZebraCrossings = true;
   bool _filterTransit = true;
   bool _filterBus = true;
   bool _filterBarriers = true;
@@ -70,9 +77,14 @@ class _NavigationScreenState extends ConsumerState<NavigationScreen> with Ticker
   late Animation<double> _routeAnimation;
 
   // ─── Risk State & GPS Confidence (ข้อ 5, 6, 10 ของอาจารย์) ───
+  final RiskEngine _riskEngine = RiskEngine();
+  final VisionTrigger _visionTrigger = VisionTrigger();
   RiskState _currentRiskState = RiskState.safe;
-  double _gpsAccuracy = 0.0;
-  String _sensorFusionStatus = 'GPS';
+  CameraTriggerState _cameraTriggerState = CameraTriggerState.sleep;
+  GpsFixQuality _gpsFixQuality = GpsFixQuality.highPrecision;
+  double _dynamicSafetyMargin = 12.0;
+  double _gpsAccuracy = 4.0;
+  String _sensorFusionStatus = 'ดาวเทียมตรง (GNSS Lock)';
 
   // ─── Live Google Maps-like Autocomplete Search ───
   List<Map<String, dynamic>> _destSuggestions = [];
@@ -102,6 +114,10 @@ class _NavigationScreenState extends ConsumerState<NavigationScreen> with Ticker
   @override
   void initState() {
     super.initState();
+    final accState = ref.read(accessibilityProvider);
+    if (accState.accessibilityMode == 'visual') {
+      _voiceOnlyMode = true;
+    }
     _detectAndSetCurrentLocation();
     _loadAccessibilityGISLayer();
     _checkRecoverySession();
@@ -397,6 +413,8 @@ class _NavigationScreenState extends ConsumerState<NavigationScreen> with Ticker
   void dispose() {
     _navigationTimer?.cancel();
     _liveGpsSubscription?.cancel();
+    _riskEngine.dispose();
+    _visionTrigger.dispose();
     BackgroundNavigationService.stopNavigation();
     _originController.dispose();
     _destController.dispose();
@@ -505,6 +523,8 @@ class _NavigationScreenState extends ConsumerState<NavigationScreen> with Ticker
   void _startLiveNavigationCountdown() async {
     _navigationTimer?.cancel();
     _currentStepIndex = 0;
+    _announcedHazards.clear();
+    _lastHazardAlert = null;
     
     final acc = ref.read(accessibilityProvider);
 
@@ -657,6 +677,9 @@ class _NavigationScreenState extends ConsumerState<NavigationScreen> with Ticker
       final currentLng = pos.longitude;
       final newDist = Geolocator.distanceBetween(currentLat, currentLng, destLat, destLng).round();
 
+      // Proactive Hazard & Crosswalk Spoken Alerts (แจ้งเตือนล่วงหน้า 15-25 เมตร)
+      _checkProactiveHazardAlerts(currentLat, currentLng, acc, accuracy: pos.accuracy, speed: pos.speed.clamp(0.0, 3.0));
+
       setState(() {
         _remainingDistance = newDist;
         _gpsAccuracy = pos.accuracy;
@@ -702,6 +725,159 @@ class _NavigationScreenState extends ConsumerState<NavigationScreen> with Ticker
     }
   }
 
+  void _checkProactiveHazardAlerts(double currentLat, double currentLng, AccessibilityState acc, {double accuracy = 5.0, double speed = 1.2}) {
+    if (_gisBarriers.isEmpty) return;
+
+    double minDistance = double.infinity;
+    Map<String, dynamic>? closestHazard;
+    String closestHazardId = '';
+
+    for (final bar in _gisBarriers) {
+      double? bLat = (bar['lat'] as num?)?.toDouble();
+      double? bLon = (bar['lon'] as num?)?.toDouble();
+      if (bLat == null && bar['location'] is Map) {
+        bLat = (bar['location']['latitude'] as num?)?.toDouble();
+        bLon = (bar['location']['longitude'] as num?)?.toDouble();
+      }
+      if (bLat == null || bLon == null) continue;
+
+      final dist = Geolocator.distanceBetween(currentLat, currentLng, bLat, bLon);
+      if (dist < minDistance) {
+        minDistance = dist;
+        closestHazard = bar;
+        closestHazardId = '${bar['name']}_${bLat.toStringAsFixed(4)}_${bLon.toStringAsFixed(4)}';
+      }
+    }
+
+    if (closestHazard == null) return;
+
+    // ประเมิน HazardSeverity ตามประเภทของจุดเสี่ยง
+    final String hName = closestHazard['name']?.toString() ?? 'สิ่งกีดขวาง';
+    HazardSeverity severity = HazardSeverity.medium;
+    if (hName.contains('หลุม') || hName.contains('ก่อสร้าง') || hName.contains('รถ') || hName.contains('ท่อ')) {
+      severity = HazardSeverity.critical;
+    } else if (hName.contains('ชำรุด') || hName.contains('แยก') || hName.contains('ม้าลาย')) {
+      severity = HazardSeverity.high;
+    } else {
+      severity = HazardSeverity.medium;
+    }
+
+    // ประเมินด้วย RiskEngine แบบปรับตาม GPS Uncertainty Factor (ดาวเทียม / Wi-Fi / Cell Site)
+    final riskLevel = _riskEngine.evaluate(
+      distanceMeters: minDistance,
+      gpsAccuracy: accuracy,
+      walkingSpeed: speed,
+      severity: severity,
+    );
+
+    // ควบคุมกล้อง AI ตามสถานะ CameraTriggerState (Event-Driven Vision)
+    if (riskLevel.cameraTrigger == CameraTriggerState.activeScanning && _visionTrigger.state == VisionState.idle) {
+      _visionTrigger.trigger(VisionTriggerReason.riskEscalation);
+    }
+
+    setState(() {
+      _currentRiskState = riskLevel.state;
+      _cameraTriggerState = riskLevel.cameraTrigger;
+      _gpsFixQuality = riskLevel.gpsQuality;
+      _dynamicSafetyMargin = riskLevel.safetyMarginMeters;
+      _gpsAccuracy = accuracy;
+      _sensorFusionStatus = _getGpsQualityLabel(riskLevel.gpsQuality);
+    });
+
+    // ตรวจสอบระยะเตือนแบบ Dynamic ตาม Safety Margin ที่คำนวณได้
+    if (minDistance <= _dynamicSafetyMargin) {
+      // เช็ค Audio Cooldown & Deduplication เพื่อป้องกันเสียงเตือนพร่ำเพรื่อ (Anti-Alert Fatigue)
+      if (_riskEngine.shouldPlayAudioAlert(closestHazardId)) {
+        // Micro-alert เสียงสั้นกระชับ (ไม่เกิน 1.5 วินาที)
+        String spokenAlert = 'ระวัง $hName';
+        if (hName.contains('ทางม้าลาย') || hName.contains('ทางข้าม')) {
+          spokenAlert = 'พบทางม้าลายข้างหน้า';
+        } else if (hName.contains('แยก') || hName.contains('สัญญาณไฟ')) {
+          spokenAlert = 'ระวัง สี่แยกไฟแดง';
+        } else if (hName.contains('แคบ') || hName.contains('เสา')) {
+          spokenAlert = 'ระวัง เสาไฟขวางทาง';
+        } else if (hName.contains('ชำรุด') || hName.contains('หลุม') || hName.contains('ท่อ')) {
+          spokenAlert = 'ระวัง ทางเท้าชำรุด';
+        }
+
+        if (acc.hapticEnabled) {
+          if (severity == HazardSeverity.critical) {
+            // สั่น 2 จังหวะ (Double Pulse) สำหรับอันตรายร้ายแรง (หลุมลึก/ท่อเปิด/รถบนทางเดิน)
+            HapticFeedback.heavyImpact();
+            Future.delayed(const Duration(milliseconds: 160), () => HapticFeedback.heavyImpact());
+          } else {
+            // สั่นระดับกลาง 1 ครั้ง สำหรับเสาไฟฟ้าหรือทางแคบ
+            HapticFeedback.mediumImpact();
+          }
+        }
+
+        // Auto-Incident Logging ส่งต่อข้อมูลจุดเสี่ยงไปยังระบบ กทม. / Traffy Fondue ในพื้นหลัง
+        _autoLogIncidentToBMA(
+          lat: currentLat,
+          lng: currentLng,
+          hazardType: hName,
+          severity: severity.name,
+        );
+
+        setState(() {
+          _lastHazardAlert = '$spokenAlert (ระยะ ${minDistance.round()} ม.)';
+        });
+
+        announceSpeech(spokenAlert, true);
+      }
+    }
+  }
+
+  /// Auto-Incident Logging: ส่งข้อมูลจุดเสี่ยงที่ตรวจพบเข้าสู่ระบบ กทม. / Traffy Fondue (Item 5)
+  void _autoLogIncidentToBMA({
+    required double lat,
+    required double lng,
+    required String hazardType,
+    required String severity,
+  }) {
+    try {
+      final url = Uri.parse('${ApiClient.getDefaultBaseUrl()}/api/v1/intelligence/incident-log');
+      http.post(
+        url,
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({
+          'timestamp': DateTime.now().toUtc().toIso8601String(),
+          'lat': lat,
+          'lng': lng,
+          'hazard_type': hazardType,
+          'confidence': 0.88,
+          'severity': severity,
+          'description': 'ตรวจจับโดย TAM AI Assistance (ไม้เท้าขาวร่วมกับเรดาร์ล่วงหน้า)',
+        }),
+      ).catchError((_) {
+        return http.Response('{"status":"offline_logged"}', 200);
+      });
+    } catch (_) {}
+  }
+
+  void _announceCurrentContextAndSurroundings(AccessibilityState acc) {
+    if (acc.hapticEnabled) HapticFeedback.mediumImpact();
+    
+    final dest = _destController.text.trim().isNotEmpty ? _destController.text.trim() : "จุดหมาย";
+    final distText = _remainingDistance > 1000 
+        ? '${(_remainingDistance / 1000).toStringAsFixed(1)} กิโลเมตร' 
+        : '$_remainingDistance เมตร';
+
+    List<String> contextParts = [];
+    contextParts.add('ข้อมูลตำแหน่ง: กำลังนำทางไปยัง $dest');
+    contextParts.add('เหลือระยะทางอีก $distText');
+    contextParts.add('คำแนะนำล่าสุด: $_liveInstruction');
+
+    if (_lastHazardAlert != null) {
+      contextParts.add('จุดแจ้งเตือน: $_lastHazardAlert');
+    } else {
+      contextParts.add('สภาพแวดล้อม: ไม่มีสิ่งกีดขวางร้ายแรงในระยะประชิด');
+    }
+
+    final speech = contextParts.join('. ');
+    announceSpeech(speech, true);
+  }
+
   @override
   Widget build(BuildContext context) {
     final acc = ref.watch(accessibilityProvider);
@@ -713,18 +889,65 @@ class _NavigationScreenState extends ConsumerState<NavigationScreen> with Ticker
         title: Semantics(
           header: true,
           child: Text(
-            'แผนที่นำทางช่วยเหลือ',
-            style: TextStyle(fontSize: 20 * acc.fontScale, fontWeight: FontWeight.bold),
+            _voiceOnlyMode ? 'นำทางด้วยเสียง (Voice)' : 'แผนที่นำทางช่วยเหลือ',
+            style: TextStyle(fontSize: 18 * acc.fontScale, fontWeight: FontWeight.bold),
           ),
         ),
-        backgroundColor: primaryColor,
+        backgroundColor: _voiceOnlyMode
+            ? (isHighContrast ? Colors.black : const Color(0xFF0F172A))
+            : primaryColor,
         foregroundColor: Colors.white,
         elevation: isHighContrast ? 0 : 4,
+        actions: [
+          Padding(
+            padding: const EdgeInsets.only(right: 10.0),
+            child: Semantics(
+              button: true,
+              label: _voiceOnlyMode ? 'สลับไปยังโหมดแผนที่' : 'สลับไปยังโหมดเสียงสำหรับคนตาบอด',
+              child: ElevatedButton.icon(
+                icon: Icon(
+                  _voiceOnlyMode ? Icons.map_rounded : Icons.record_voice_over_rounded,
+                  size: 18,
+                  color: _voiceOnlyMode ? Colors.white : Colors.yellowAccent,
+                ),
+                label: Text(
+                  _voiceOnlyMode ? 'ดูแผนที่' : 'โหมดเสียงตาบอด',
+                  style: TextStyle(
+                    fontSize: 12 * acc.fontScale,
+                    fontWeight: FontWeight.bold,
+                    color: Colors.white,
+                  ),
+                ),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: _voiceOnlyMode ? const Color(0xFF334155) : const Color(0xFF0F766E),
+                  foregroundColor: Colors.white,
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(16),
+                    side: const BorderSide(color: Colors.white70, width: 1.2),
+                  ),
+                ),
+                onPressed: () {
+                  setState(() {
+                    _voiceOnlyMode = !_voiceOnlyMode;
+                  });
+                  final msg = _voiceOnlyMode
+                      ? 'เปิดโหมดนำทางด้วยเสียงอย่างเดียว สำหรับผู้พิการทางสายตา'
+                      : 'เปิดโหมดแผนที่นำทางแบบมองเห็น';
+                  announceSpeech(msg, true);
+                  if (acc.hapticEnabled) HapticFeedback.mediumImpact();
+                },
+              ),
+            ),
+          ),
+        ],
         bottom: isHighContrast ? const PreferredSize(preferredSize: Size.fromHeight(1), child: Divider(height: 1, color: Colors.white)) : null,
       ),
       backgroundColor: isHighContrast ? Colors.black : const Color(0xFFE9ECEF),
-      body: Stack(
-        children: [
+      body: _voiceOnlyMode
+          ? _buildVoiceOnlyView(context, acc, isHighContrast, primaryColor)
+          : Stack(
+              children: [
           // ═══ Real Interactive OpenStreetMap & Google Maps-grade View ═══
           Positioned.fill(
             child: Builder(
@@ -751,29 +974,40 @@ class _NavigationScreenState extends ConsumerState<NavigationScreen> with Ticker
                   mapController: _mapController,
                   options: MapOptions(
                     initialCenter: ll.LatLng(userLat, userLng),
-                    initialZoom: 16.0,
-                    minZoom: 4.0,
-                    maxZoom: 19.0,
+                    initialZoom: 16.5,
+                    minZoom: 12.0,
+                    maxZoom: 19.5,
+                    interactionOptions: const InteractionOptions(
+                      flags: InteractiveFlag.all,
+                    ),
+                    onPositionChanged: (camera, hasGesture) {
+                      _mapZoom = camera.zoom;
+                    },
                   ),
                   children: [
                     TileLayer(
-                      urlTemplate: isHighContrast
-                          ? 'https://tiles.stadiamaps.com/tiles/alidade_smooth_dark/{z}/{x}/{y}.png'
-                          : 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
-                      userAgentPackageName: 'com.example.accessibility_assistant',
+                      key: ValueKey('map_tile_theme_$_mapThemeStyle'),
+                      urlTemplate: _getMapTileUrl(_mapThemeStyle),
+                      subdomains: _getMapSubdomains(_mapThemeStyle),
+                      userAgentPackageName: 'com.feefive.accessible_navigation',
+                      maxZoom: 20.0,
                     ),
-                    if (routePolylinePoints.isNotEmpty)
+                    if (routePolylinePoints.isNotEmpty) ...[
                       PolylineLayer(
                         polylines: [
                           Polyline(
                             points: routePolylinePoints,
-                            color: isHighContrast ? Colors.yellowAccent : const Color(0xFF4F46E5),
-                            strokeWidth: 5.5,
-                            borderColor: Colors.black45,
-                            borderStrokeWidth: 1.5,
+                            color: isHighContrast ? Colors.yellowAccent : const Color(0xFF2563EB),
+                            strokeWidth: 7.0,
+                            borderColor: Colors.white,
+                            borderStrokeWidth: 2.0,
                           ),
                         ],
                       ),
+                      MarkerLayer(
+                        markers: _buildRouteDirectionMarkers(routePolylinePoints, isHighContrast),
+                      ),
+                    ],
                     MarkerLayer(
                       markers: [
                         ..._buildGisMarkers(acc, isHighContrast),
@@ -852,61 +1086,7 @@ class _NavigationScreenState extends ConsumerState<NavigationScreen> with Ticker
             ),
           ),
 
-          // Floating Map Controls (+ / - / Recenter GPS)
-          Positioned(
-            right: 16.0,
-            top: _isNavigating ? (_isCardCollapsed ? 90.0 : 24.0) : null,
-            bottom: _isNavigating ? null : 90.0,
-            child: PointerInterceptor(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                FloatingActionButton.small(
-                  heroTag: 'zoom_in_btn',
-                  backgroundColor: isHighContrast ? Colors.black : Colors.white,
-                  foregroundColor: isHighContrast ? Colors.white : Colors.black87,
-                  onPressed: () {
-                    try {
-                      final currentZoom = _mapController.camera.zoom;
-                      _mapController.move(_mapController.camera.center, currentZoom + 1);
-                    } catch (_) {}
-                  },
-                  child: const Icon(Icons.add),
-                ),
-                const SizedBox(height: 8),
-                FloatingActionButton.small(
-                  heroTag: 'zoom_out_btn',
-                  backgroundColor: isHighContrast ? Colors.black : Colors.white,
-                  foregroundColor: isHighContrast ? Colors.white : Colors.black87,
-                  onPressed: () {
-                    try {
-                      final currentZoom = _mapController.camera.zoom;
-                      _mapController.move(_mapController.camera.center, currentZoom - 1);
-                    } catch (_) {}
-                  },
-                  child: const Icon(Icons.remove),
-                ),
-                const SizedBox(height: 8),
-                FloatingActionButton.small(
-                  heroTag: 'recenter_gps_btn',
-                  backgroundColor: isHighContrast ? Colors.black : primaryColor,
-                  foregroundColor: Colors.white,
-                  onPressed: () async {
-                    try {
-                      final pos = await Geolocator.getCurrentPosition(timeLimit: const Duration(seconds: 3));
-                      _mapController.move(ll.LatLng(pos.latitude, pos.longitude), 16.5);
-                    } catch (_) {
-                      if (_customOriginLat != null) {
-                        _mapController.move(ll.LatLng(_customOriginLat!, _customOriginLng!), 16.5);
-                      }
-                    }
-                  },
-                  child: const Icon(Icons.my_location_rounded),
-                ),
-              ],
-            ),
-          ),
-        ),
+
 
           // Search Form Card overlay
           // 1. Search Form Card overlay (Shown ONLY when !_isNavigating)
@@ -1180,87 +1360,116 @@ class _NavigationScreenState extends ConsumerState<NavigationScreen> with Ticker
           // 2. Live Navigation Guidance Sheet (Collapsible & Expandable)
           if (_isNavigating) ...[
             if (_isCardCollapsed)
-              // ─── Collapsed Compact Floating Pill Banner ───
+              // ─── Google Maps Style Top Floating Navigation Banner ───
               Positioned(
-                top: 16.0,
-                left: 16.0,
-                right: 16.0,
+                top: 12.0,
+                left: 12.0,
+                right: 12.0,
                 child: PointerInterceptor(
-                  child: Card(
-                    color: isHighContrast ? Colors.black : Colors.white,
-                    elevation: 8,
-                    shape: RoundedRectangleBorder(
+                  child: Container(
+                    decoration: BoxDecoration(
+                      color: isHighContrast ? Colors.black : const Color(0xFF15803D), // High-contrast green header like Google Maps
                       borderRadius: BorderRadius.circular(16),
-                      side: isHighContrast ? const BorderSide(color: Colors.white, width: 2) : BorderSide.none,
+                      border: isHighContrast ? Border.all(color: Colors.white, width: 2.5) : null,
+                      boxShadow: const [
+                        BoxShadow(color: Colors.black38, blurRadius: 10, offset: Offset(0, 4)),
+                      ],
                     ),
-                    child: Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 12.0, vertical: 10.0),
-                      child: Row(
-                        children: [
-                          CircleAvatar(
-                            radius: 20,
-                            backgroundColor: isHighContrast ? Colors.white24 : Colors.green[800],
-                            child: Icon(_liveDirectionIcon, color: Colors.white, size: 22),
+                    padding: const EdgeInsets.symmetric(horizontal: 14.0, vertical: 12.0),
+                    child: Row(
+                      children: [
+                        // Large Maneuver Icon
+                        Container(
+                          width: 46,
+                          height: 46,
+                          decoration: BoxDecoration(
+                            shape: BoxShape.circle,
+                            color: isHighContrast ? Colors.white24 : Colors.white.withOpacity(0.2),
+                            border: Border.all(color: Colors.white, width: 1.5),
                           ),
-                          const SizedBox(width: 10),
-                          Expanded(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                Text(
-                                  _liveInstruction,
-                                  style: TextStyle(
-                                    fontSize: 13 * acc.fontScale,
-                                    fontWeight: FontWeight.bold,
-                                    color: isHighContrast ? Colors.white : Colors.black87,
-                                  ),
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
+                          child: Icon(_liveDirectionIcon, color: Colors.white, size: 28),
+                        ),
+                        const SizedBox(width: 12),
+                        // Direction Text + Distance & ETA
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Text(
+                                _liveInstruction,
+                                style: TextStyle(
+                                  fontSize: 15 * acc.fontScale,
+                                  fontWeight: FontWeight.bold,
+                                  color: isHighContrast ? Colors.yellowAccent : Colors.white,
+                                  height: 1.2,
                                 ),
-                                Text(
-                                  _remainingDistance > 1000
-                                      ? 'เหลือ ${(_remainingDistance / 1000).toStringAsFixed(1)} กม. • ${_getModeSummaryText(_currentTravelMode)}'
-                                      : 'เหลือ $_remainingDistance ม. • ${_getModeSummaryText(_currentTravelMode)}',
-                                  style: TextStyle(
-                                    fontSize: 11 * acc.fontScale,
-                                    color: isHighContrast ? Colors.lightGreenAccent : Colors.green[800],
-                                    fontWeight: FontWeight.w600,
+                                maxLines: 2,
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                              const SizedBox(height: 3),
+                              Row(
+                                children: [
+                                  Icon(Icons.directions_walk_rounded, size: 14, color: isHighContrast ? Colors.white70 : Colors.white70),
+                                  const SizedBox(width: 3),
+                                  Text(
+                                    _remainingDistance > 1000
+                                        ? 'เหลือ ${(_remainingDistance / 1000).toStringAsFixed(1)} กม. • ประมาณ ${(_remainingDistance / 75).ceil()} นาที'
+                                        : 'เหลือ $_remainingDistance ม. • ประมาณ ${math.max(1, (_remainingDistance / 75).ceil())} นาที',
+                                    style: TextStyle(
+                                      fontSize: 12 * acc.fontScale,
+                                      color: isHighContrast ? Colors.white70 : Colors.white.withOpacity(0.9),
+                                      fontWeight: FontWeight.w600,
+                                    ),
                                   ),
+                                ],
+                              ),
+                            ],
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        // Quick Action Buttons (Details / Cancel)
+                        Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            // Details Expand Button
+                            InkWell(
+                              onTap: () => setState(() => _isCardCollapsed = false),
+                              borderRadius: BorderRadius.circular(8),
+                              child: Container(
+                                padding: const EdgeInsets.all(6),
+                                decoration: BoxDecoration(
+                                  color: Colors.white.withOpacity(0.2),
+                                  borderRadius: BorderRadius.circular(8),
                                 ),
-                              ],
+                                child: const Icon(Icons.list_alt_rounded, color: Colors.white, size: 20),
+                              ),
                             ),
-                          ),
-                          const SizedBox(width: 6),
-                          // Expand Button (ขยายดูข้อมูล)
-                          ElevatedButton.icon(
-                            icon: const Icon(Icons.unfold_more_rounded, size: 16),
-                            label: Text('ขยายการ์ด', style: TextStyle(fontSize: 11 * acc.fontScale, fontWeight: FontWeight.bold)),
-                            style: ElevatedButton.styleFrom(
-                              backgroundColor: isHighContrast ? Colors.yellowAccent : primaryColor,
-                              foregroundColor: isHighContrast ? Colors.black : Colors.white,
-                              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                            const SizedBox(height: 6),
+                            // Quick Exit
+                            InkWell(
+                              onTap: () {
+                                _navigationTimer?.cancel();
+                                BackgroundNavigationService.stopNavigation();
+                                setState(() {
+                                  _isNavigating = false;
+                                  _isCardCollapsed = false;
+                                  _showRerouteAlert = false;
+                                });
+                              },
+                              borderRadius: BorderRadius.circular(8),
+                              child: Container(
+                                padding: const EdgeInsets.all(6),
+                                decoration: BoxDecoration(
+                                  color: Colors.red.withOpacity(0.3),
+                                  borderRadius: BorderRadius.circular(8),
+                                ),
+                                child: const Icon(Icons.close_rounded, color: Colors.white, size: 20),
+                              ),
                             ),
-                            onPressed: () => setState(() => _isCardCollapsed = false),
-                          ),
-                          const SizedBox(width: 4),
-                          // Quick Cancel Button
-                          IconButton(
-                            icon: const Icon(Icons.close_rounded, color: Colors.red, size: 20),
-                            tooltip: 'ยกเลิกการนำทาง',
-                            onPressed: () {
-                              _navigationTimer?.cancel();
-                              BackgroundNavigationService.stopNavigation();
-                              setState(() {
-                                _isNavigating = false;
-                                _isCardCollapsed = false;
-                                _showRerouteAlert = false;
-                              });
-                            },
-                          ),
-                        ],
-                      ),
+                          ],
+                        ),
+                      ],
                     ),
                   ),
                 ),
@@ -1268,7 +1477,7 @@ class _NavigationScreenState extends ConsumerState<NavigationScreen> with Ticker
             else
               // ─── Expanded Full Details Navigation Card ───
               Positioned(
-                top: 16.0,
+                top: 12.0,
                 right: 16.0,
                 left: 16.0,
                 bottom: 80.0,
@@ -1356,7 +1565,7 @@ class _NavigationScreenState extends ConsumerState<NavigationScreen> with Ticker
                                 crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
 
-                          // ─── Risk State Badge + GPS Confidence (ข้อ 5, 6, 10) ───
+                          // ─── Risk State Badge + Dynamic GPS Factor + Camera Triggering ───
                           Container(
                             width: double.infinity,
                             margin: const EdgeInsets.only(bottom: 4),
@@ -1369,28 +1578,48 @@ class _NavigationScreenState extends ConsumerState<NavigationScreen> with Ticker
                                 width: 1.5,
                               ),
                             ),
-                            child: Row(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
-                                Icon(
-                                  _getRiskIcon(_currentRiskState),
-                                  color: isHighContrast ? Colors.white : _getRiskBadgeColor(_currentRiskState),
-                                  size: 18,
-                                ),
-                                const SizedBox(width: 6),
-                                Expanded(
-                                  child: Text(
-                                    'Risk: ${_getRiskLabel(_currentRiskState)}  |  GPS: ±${_gpsAccuracy.toStringAsFixed(0)}m  |  $_sensorFusionStatus',
-                                    style: TextStyle(
-                                      fontSize: 11 * acc.fontScale,
-                                      fontWeight: FontWeight.bold,
+                                Row(
+                                  children: [
+                                    Icon(
+                                      _getRiskIcon(_currentRiskState),
                                       color: isHighContrast ? Colors.white : _getRiskBadgeColor(_currentRiskState),
+                                      size: 18,
                                     ),
-                                  ),
+                                    const SizedBox(width: 6),
+                                    Expanded(
+                                      child: Text(
+                                        'ความเสี่ยง: ${_getRiskLabel(_currentRiskState)} | ระยะปลอดภัย: ${_dynamicSafetyMargin.toStringAsFixed(1)} ม.',
+                                        style: TextStyle(
+                                          fontSize: 11 * acc.fontScale,
+                                          fontWeight: FontWeight.bold,
+                                          color: isHighContrast ? Colors.white : _getRiskBadgeColor(_currentRiskState),
+                                        ),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                                const SizedBox(height: 4),
+                                Row(
+                                  children: [
+                                    Expanded(
+                                      child: Text(
+                                        '📡 GPS: ±${_gpsAccuracy.toStringAsFixed(0)}ม. (${_getGpsQualityLabel(_gpsFixQuality)})',
+                                        style: TextStyle(fontSize: 10 * acc.fontScale, color: isHighContrast ? Colors.white70 : Colors.grey[800]),
+                                      ),
+                                    ),
+                                    Text(
+                                      _getCameraTriggerLabel(_cameraTriggerState),
+                                      style: TextStyle(fontSize: 10 * acc.fontScale, fontWeight: FontWeight.w600, color: _getCameraTriggerColor(_cameraTriggerState)),
+                                    ),
+                                  ],
                                 ),
                               ],
                             ),
                           ),
-                          // Background FGS Status
+                                                    // Background FGS Status
                           Container(
                             width: double.infinity,
                             margin: const EdgeInsets.only(bottom: 8),
@@ -1693,34 +1922,7 @@ class _NavigationScreenState extends ConsumerState<NavigationScreen> with Ticker
     ], // closes if (_isNavigating) ...[
 
           // Map Filter Options Toolbar (Chips)
-          // GIS Accessibility Layer Filter Chips (Visible at bottom of map)
-          Positioned(
-            bottom: 14.0,
-            left: 16.0,
-            right: 84.0,
-            child: MouseRegion(
-              onEnter: (_) => toggleMapIframeClickable(false),
-              onExit: (_) => toggleMapIframeClickable(true),
-              child: SingleChildScrollView(
-                scrollDirection: Axis.horizontal,
-                child: Row(
-                  children: [
-                    _buildFilterChip('BTS / MRT (${_transitStations.length})', Icons.directions_subway_rounded, _filterTransit, (val) => setState(() => _filterTransit = val), const Color(0xFF1E3A8A), isHighContrast, acc),
-                    const SizedBox(width: 8),
-                    _buildFilterChip('ป้ายรถเมล์ (${_busStops.length})', Icons.directions_bus_rounded, _filterBus, (val) => setState(() => _filterBus = val), Colors.teal[800]!, isHighContrast, acc),
-                    const SizedBox(width: 8),
-                    _buildFilterChip('ลิฟต์', Icons.elevator_rounded, _filterElevators, (val) => setState(() => _filterElevators = val), primaryColor, isHighContrast, acc),
-                    const SizedBox(width: 8),
-                    _buildFilterChip('ทางลาด', Icons.accessible_rounded, _filterRamps, (val) => setState(() => _filterRamps = val), Colors.green[700]!, isHighContrast, acc),
-                    const SizedBox(width: 8),
-                    _buildFilterChip('ทางนำสายตา', Icons.alt_route_rounded, _filterTactilePaths, (val) => setState(() => _filterTactilePaths = val), Colors.amber[800]!, isHighContrast, acc),
-                    const SizedBox(width: 8),
-                    _buildFilterChip('⚠️ สิ่งกีดขวาง (${_gisBarriers.length})', Icons.warning_amber_rounded, _filterBarriers, (val) => setState(() => _filterBarriers = val), Colors.red[800]!, isHighContrast, acc),
-                  ],
-                ),
-              ),
-            ),
-          ),
+
 
           // Reroute Alert Dialog Simulator Overlay
           if (_showRerouteAlert)
@@ -1794,42 +1996,526 @@ class _NavigationScreenState extends ConsumerState<NavigationScreen> with Ticker
               ),
             ),
           
-          // Physical Zoom Controls
+          // ─── Floating Accessibility & Map Controls Toolbar ───
           Positioned(
-              right: 16,
-              bottom: 100,
+            right: 16,
+            bottom: _isNavigating ? 30 : 24,
+            child: PointerInterceptor(
               child: Column(
+                mainAxisSize: MainAxisSize.min,
                 children: [
+                  // 1. Zoom In (+)
                   FloatingActionButton.small(
                     heroTag: 'map_zoom_in_fab',
+                    tooltip: 'ซูมเข้า (+)',
                     onPressed: () {
                       if (acc.hapticEnabled) HapticFeedback.lightImpact();
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(content: Text('กำลังขยายแผนที่ (Zoom In)')),
-                      );
+                      final currentZoom = _mapController.camera.zoom;
+                      final targetZoom = (currentZoom + 1.0).clamp(12.0, 19.5);
+                      _mapController.move(_mapController.camera.center, targetZoom);
                     },
-                    backgroundColor: isHighContrast ? Colors.white : primaryColor,
-                    foregroundColor: isHighContrast ? Colors.black : Colors.white,
-                    child: const Icon(Icons.add, size: 24),
+                    backgroundColor: isHighContrast ? Colors.black : Colors.white,
+                    foregroundColor: isHighContrast ? Colors.white : primaryColor,
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12),
+                      side: isHighContrast ? const BorderSide(color: Colors.white, width: 2) : const BorderSide(color: Colors.black12),
+                    ),
+                    elevation: 5,
+                    child: const Icon(Icons.add_rounded, size: 24),
                   ),
                   const SizedBox(height: 8),
+                  // 2. Zoom Out (-)
                   FloatingActionButton.small(
                     heroTag: 'map_zoom_out_fab',
+                    tooltip: 'ซูมออก (-)',
                     onPressed: () {
                       if (acc.hapticEnabled) HapticFeedback.lightImpact();
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(content: Text('กำลังย่อแผนที่ (Zoom Out)')),
-                      );
+                      final currentZoom = _mapController.camera.zoom;
+                      final targetZoom = (currentZoom - 1.0).clamp(12.0, 19.5);
+                      _mapController.move(_mapController.camera.center, targetZoom);
                     },
-                    backgroundColor: isHighContrast ? Colors.white : primaryColor,
-                    foregroundColor: isHighContrast ? Colors.black : Colors.white,
-                    child: const Icon(Icons.remove, size: 24),
+                    backgroundColor: isHighContrast ? Colors.black : Colors.white,
+                    foregroundColor: isHighContrast ? Colors.white : primaryColor,
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12),
+                      side: isHighContrast ? const BorderSide(color: Colors.white, width: 2) : const BorderSide(color: Colors.black12),
+                    ),
+                    elevation: 5,
+                    child: const Icon(Icons.remove_rounded, size: 24),
+                  ),
+                  const SizedBox(height: 8),
+                  // 3. Recenter Current Location (📍)
+                  FloatingActionButton.small(
+                    heroTag: 'recenter_gps_fab',
+                    tooltip: 'กลับมาที่ตำแหน่งปัจจุบันของฉัน (GPS)',
+                    onPressed: () async {
+                      if (acc.hapticEnabled) HapticFeedback.mediumImpact();
+                      announceSpeech('กลับมาที่ตำแหน่งปัจจุบันของคุณ', acc.voiceEnabled);
+                      try {
+                        final pos = await Geolocator.getCurrentPosition(timeLimit: const Duration(seconds: 3));
+                        _mapController.move(ll.LatLng(pos.latitude, pos.longitude), 17.5);
+                      } catch (_) {
+                        if (_customOriginLat != null) {
+                          _mapController.move(ll.LatLng(_customOriginLat!, _customOriginLng!), 17.5);
+                        }
+                      }
+                    },
+                    backgroundColor: isHighContrast ? Colors.black : primaryColor,
+                    foregroundColor: Colors.white,
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12),
+                      side: isHighContrast ? const BorderSide(color: Colors.white, width: 2) : BorderSide.none,
+                    ),
+                    elevation: 6,
+                    child: const Icon(Icons.my_location_rounded, size: 22),
+                  ),
+                  // 4. Voice Guidance Repeat (🔊)
+                  if (_isNavigating) ...[
+                    const SizedBox(height: 8),
+                    FloatingActionButton.small(
+                      heroTag: 'voice_guidance_repeat_fab',
+                      tooltip: 'ฟังเสียงนำทางซ้ำ (Voice Guidance)',
+                      onPressed: () {
+                        if (acc.hapticEnabled) HapticFeedback.mediumImpact();
+                        announceSpeech(_liveInstruction, true);
+                      },
+                      backgroundColor: isHighContrast ? Colors.yellowAccent : Colors.green[800],
+                      foregroundColor: isHighContrast ? Colors.black : Colors.white,
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12),
+                        side: isHighContrast ? const BorderSide(color: Colors.black, width: 2) : BorderSide.none,
+                      ),
+                      elevation: 6,
+                      child: const Icon(Icons.volume_up_rounded, size: 22),
+                    ),
+                  ],
+                ],
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildVoiceOnlyView(BuildContext context, AccessibilityState acc, bool isHighContrast, Color primaryColor) {
+    if (!_isNavigating) {
+      // ═══ Pre-Navigation Voice Mode Screen (Ultra Simple Search) ═══
+      return Container(
+        color: isHighContrast ? Colors.black : const Color(0xFF0F172A),
+        padding: const EdgeInsets.all(20.0),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            // Mode Header Badge
+            Container(
+              padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 16),
+              decoration: BoxDecoration(
+                color: isHighContrast ? Colors.yellowAccent.withOpacity(0.15) : const Color(0xFF1E293B),
+                borderRadius: BorderRadius.circular(16),
+                border: Border.all(
+                  color: isHighContrast ? Colors.yellowAccent : const Color(0xFF0EA5E9),
+                  width: 2,
+                ),
+              ),
+              child: Row(
+                children: [
+                  Icon(Icons.record_voice_over_rounded, color: isHighContrast ? Colors.yellowAccent : const Color(0xFF38BDF8), size: 32),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'โหมดเสียงอย่างเดียว (Voice-Only)',
+                          style: TextStyle(
+                            fontSize: 16 * acc.fontScale,
+                            fontWeight: FontWeight.bold,
+                            color: isHighContrast ? Colors.yellowAccent : Colors.white,
+                          ),
+                        ),
+                        Text(
+                          'ออกแบบพิเศษสำหรับผู้พิการทางสายตา ตัดแผนที่และปุ่มรกออกทั้งหมด',
+                          style: TextStyle(fontSize: 12 * acc.fontScale, color: Colors.white70),
+                        ),
+                      ],
+                    ),
                   ),
                 ],
               ),
             ),
+            const SizedBox(height: 20),
+
+            // Destination Field
+            Text(
+              'เลือกสถานที่ปลายทาง:',
+              style: TextStyle(fontSize: 16 * acc.fontScale, fontWeight: FontWeight.bold, color: Colors.white),
+            ),
+            const SizedBox(height: 8),
+            TextField(
+              controller: _destController,
+              onChanged: _onDestSearchChanged,
+              style: TextStyle(color: Colors.white, fontSize: 18 * acc.fontScale, fontWeight: FontWeight.bold),
+              decoration: InputDecoration(
+                hintText: 'พิมพ์ชื่อสถานที่ปลายทาง เช่น สยาม, โรงพยาบาล',
+                hintStyle: const TextStyle(color: Colors.white54),
+                prefixIcon: const Icon(Icons.search_rounded, color: Colors.yellowAccent, size: 28),
+                suffixIcon: IconButton(
+                  icon: const Icon(Icons.mic_rounded, color: Colors.yellowAccent, size: 28),
+                  tooltip: 'พูดชื่อสถานที่ปลายทาง',
+                  onPressed: () {
+                    announceSpeech('กำลังเปิดระบบค้นหาด้วยเสียง กรุณาพูดชื่อสถานที่', true);
+                  },
+                ),
+                filled: true,
+                fillColor: const Color(0xFF1E293B),
+                border: OutlineInputBorder(borderRadius: BorderRadius.circular(16), borderSide: const BorderSide(color: Colors.white38)),
+                focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(16), borderSide: const BorderSide(color: Colors.yellowAccent, width: 2)),
+              ),
+            ),
+            if (_destSuggestions.isNotEmpty)
+              Container(
+                margin: const EdgeInsets.only(top: 8),
+                constraints: const BoxConstraints(maxHeight: 180),
+                decoration: BoxDecoration(
+                  color: const Color(0xFF1E293B),
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: Colors.yellowAccent.withOpacity(0.5)),
+                ),
+                child: ListView.separated(
+                  shrinkWrap: true,
+                  itemCount: _destSuggestions.length,
+                  separatorBuilder: (_, __) => const Divider(height: 1, color: Colors.white24),
+                  itemBuilder: (ctx, i) {
+                    final item = _destSuggestions[i];
+                    return ListTile(
+                      title: Text(item['name'] ?? item['display_name'], style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+                      trailing: const Icon(Icons.arrow_forward_ios_rounded, color: Colors.yellowAccent, size: 16),
+                      onTap: () => _selectDestination(item),
+                    );
+                  },
+                ),
+              ),
+            const SizedBox(height: 20),
+
+            // Quick Shortcut Chips for Visually Impaired
+            Text(
+              'หรือเลือกจุดหมายด่วน:',
+              style: TextStyle(fontSize: 14 * acc.fontScale, fontWeight: FontWeight.bold, color: Colors.white70),
+            ),
+            const SizedBox(height: 8),
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: [
+                _buildVoiceShortcutChip('🏥 โรงพยาบาลใกล้ที่สุด', 'โรงพยาบาล', acc),
+                _buildVoiceShortcutChip('🚆 สถานีรถไฟฟ้า BTS/MRT', 'สถานีรถไฟฟ้า', acc),
+                _buildVoiceShortcutChip('🚏 ป้ายรถเมล์', 'ป้ายรถประจำทาง', acc),
+                _buildVoiceShortcutChip('🏪 เซเว่นอีเลฟเว่น', '7-Eleven', acc),
+              ],
+            ),
+            const Spacer(),
+
+            // Big Start Navigation Button
+            SizedBox(
+              height: 64,
+              child: ElevatedButton.icon(
+                icon: const Icon(Icons.navigation_rounded, size: 30),
+                label: Text(
+                  '🚀 เริ่มนำทางด้วยเสียงทันที',
+                  style: TextStyle(fontSize: 18 * acc.fontScale, fontWeight: FontWeight.bold),
+                ),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: isHighContrast ? Colors.yellowAccent : const Color(0xFF16A34A),
+                  foregroundColor: isHighContrast ? Colors.black : Colors.white,
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
+                  elevation: 6,
+                ),
+                onPressed: _isLoading ? null : _startNavigation,
+              ),
+            ),
+            const SizedBox(height: 12),
+          ],
+        ),
+      );
+    }
+
+    // ═══ Active Live Voice-Only Navigation Screen (3-4 Giant Touch Targets) ═══
+    return Container(
+      color: isHighContrast ? Colors.black : const Color(0xFF090D16),
+      padding: const EdgeInsets.symmetric(horizontal: 18.0, vertical: 14.0),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          // 1. Top Turn-by-Turn Big Instruction Banner
+          Container(
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(
+              color: isHighContrast ? Colors.black : const Color(0xFF1E293B),
+              borderRadius: BorderRadius.circular(20),
+              border: Border.all(
+                color: isHighContrast ? Colors.white : const Color(0xFF38BDF8),
+                width: 2.5,
+              ),
+              boxShadow: const [BoxShadow(color: Colors.black54, blurRadius: 10)],
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.center,
+                  children: [
+                    CircleAvatar(
+                      radius: 26,
+                      backgroundColor: isHighContrast ? Colors.yellowAccent : const Color(0xFF2563EB),
+                      child: Icon(_liveDirectionIcon, color: isHighContrast ? Colors.black : Colors.white, size: 32),
+                    ),
+                    const SizedBox(width: 14),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            _liveInstruction,
+                            style: TextStyle(
+                              fontSize: 18 * acc.fontScale,
+                              fontWeight: FontWeight.bold,
+                              color: isHighContrast ? Colors.yellowAccent : Colors.white,
+                              height: 1.25,
+                            ),
+                          ),
+                          const SizedBox(height: 4),
+                          Text(
+                            _remainingDistance > 1000
+                                ? 'เหลืออีก ${(_remainingDistance / 1000).toStringAsFixed(1)} กม. • ประมาณ ${(_remainingDistance / 75).ceil()} นาที'
+                                : 'เหลืออีก $_remainingDistance ม. • ประมาณ ${math.max(1, (_remainingDistance / 75).ceil())} นาที',
+                            style: TextStyle(
+                              fontSize: 13 * acc.fontScale,
+                              color: isHighContrast ? Colors.white70 : const Color(0xFF94A3B8),
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+                if (_lastHazardAlert != null) ...[
+                  const Divider(height: 20, color: Colors.white24),
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                    decoration: BoxDecoration(
+                      color: Colors.red[900]!.withOpacity(0.3),
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(color: Colors.redAccent, width: 1.2),
+                    ),
+                    child: Row(
+                      children: [
+                        const Icon(Icons.warning_amber_rounded, color: Colors.yellowAccent, size: 20),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            _lastHazardAlert!,
+                            style: TextStyle(
+                              fontSize: 12.5 * acc.fontScale,
+                              color: Colors.yellowAccent,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ],
+            ),
+          ),
+          const SizedBox(height: 16),
+
+          // 2. Giant Primary Button: "แตะเพื่อฟังคำแนะนำล่าสุดซ้ำ" (Central Target)
+          Expanded(
+            flex: 3,
+            child: Semantics(
+              button: true,
+              label: 'แตะเพื่อฟังคำแนะนำล่าสุดซ้ำ คำแนะนำปัจจุบันคือ $_liveInstruction',
+              child: ElevatedButton(
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: isHighContrast ? Colors.yellowAccent : const Color(0xFF1D4ED8),
+                  foregroundColor: isHighContrast ? Colors.black : Colors.white,
+                  elevation: 8,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(24),
+                    side: BorderSide(color: isHighContrast ? Colors.black : Colors.white38, width: 2),
+                  ),
+                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 20),
+                ),
+                onPressed: () {
+                  announceSpeech(_liveInstruction, true);
+                  if (acc.hapticEnabled) HapticFeedback.mediumImpact();
+                },
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Icon(
+                      Icons.volume_up_rounded,
+                      size: 58,
+                      color: isHighContrast ? Colors.black : Colors.white,
+                    ),
+                    const SizedBox(height: 12),
+                    Text(
+                      '🔊 แตะเพื่อฟังคำแนะนำซ้ำ',
+                      textAlign: TextAlign.center,
+                      style: TextStyle(
+                        fontSize: 21 * acc.fontScale,
+                        fontWeight: FontWeight.bold,
+                        color: isHighContrast ? Colors.black : Colors.white,
+                      ),
+                    ),
+                    const SizedBox(height: 6),
+                    Text(
+                      'กดตรงนี้ได้ทุกเวลาเพื่อฟังทิศทางล่าสุด',
+                      textAlign: TextAlign.center,
+                      style: TextStyle(
+                        fontSize: 13 * acc.fontScale,
+                        color: isHighContrast ? Colors.black87 : Colors.white70,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+          const SizedBox(height: 14),
+
+          // 3. Giant Secondary Button: "บอกตำแหน่งปัจจุบัน & สิ่งรอบตัว"
+          Expanded(
+            flex: 2,
+            child: Semantics(
+              button: true,
+              label: 'บอกตำแหน่งปัจจุบันและสิ่งรอบตัว แตะเพื่อฟังพิกัด จุดสังเกต และสิ่งกีดขวาง',
+              child: ElevatedButton(
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: isHighContrast ? const Color(0xFF27272A) : const Color(0xFF0F766E),
+                  foregroundColor: Colors.white,
+                  elevation: 6,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(20),
+                    side: const BorderSide(color: Colors.white30, width: 1.5),
+                  ),
+                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+                ),
+                onPressed: () => _announceCurrentContextAndSurroundings(acc),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    const Icon(Icons.explore_rounded, size: 38, color: Colors.yellowAccent),
+                    const SizedBox(width: 14),
+                    Flexible(
+                      child: Column(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            '🧭 บอกตำแหน่ง & สิ่งรอบตัว',
+                            style: TextStyle(
+                              fontSize: 17 * acc.fontScale,
+                              fontWeight: FontWeight.bold,
+                              color: Colors.white,
+                            ),
+                          ),
+                          const SizedBox(height: 3),
+                          Text(
+                            'แตะเพื่อฟังสภาพแวดล้อมและจุดเสี่ยงใกล้ตัว',
+                            style: TextStyle(
+                              fontSize: 12 * acc.fontScale,
+                              color: Colors.white70,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+          const SizedBox(height: 14),
+
+          // 4. Bottom Row Action Buttons: "หยุดนำทาง" & "ขอความช่วยเหลือ SOS"
+          Row(
+            children: [
+              Expanded(
+                child: SizedBox(
+                  height: 56,
+                  child: ElevatedButton.icon(
+                    icon: const Icon(Icons.stop_circle_rounded, size: 24),
+                    label: Text(
+                      '🛑 หยุดนำทาง',
+                      style: TextStyle(fontSize: 15 * acc.fontScale, fontWeight: FontWeight.bold),
+                    ),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: const Color(0xFFDC2626),
+                      foregroundColor: Colors.white,
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                      elevation: 4,
+                    ),
+                    onPressed: () {
+                      _navigationTimer?.cancel();
+                      _liveGpsSubscription?.cancel();
+                      BackgroundNavigationService.stopNavigation();
+                      setState(() {
+                        _isNavigating = false;
+                        _isCardCollapsed = false;
+                        _showRerouteAlert = false;
+                      });
+                      announceSpeech('หยุดการนำทางเรียบร้อยแล้วค่ะ', true);
+                      if (acc.hapticEnabled) HapticFeedback.heavyImpact();
+                    },
+                  ),
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: SizedBox(
+                  height: 56,
+                  child: ElevatedButton.icon(
+                    icon: const Icon(Icons.emergency_rounded, size: 24),
+                    label: Text(
+                      '🆘 ขอความช่วยเหลือ',
+                      style: TextStyle(fontSize: 15 * acc.fontScale, fontWeight: FontWeight.bold),
+                    ),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: const Color(0xFFD97706),
+                      foregroundColor: Colors.white,
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                      elevation: 4,
+                    ),
+                    onPressed: () {
+                      announceSpeech('เปิดศูนย์แจ้งเหตุฉุกเฉิน SOS', true);
+                      Navigator.of(context).pushNamed('/sos');
+                    },
+                  ),
+                ),
+              ),
+            ],
+          ),
         ],
       ),
+    );
+  }
+
+  Widget _buildVoiceShortcutChip(String label, String query, AccessibilityState acc) {
+    return ActionChip(
+      label: Text(label, style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 13 * acc.fontScale)),
+      backgroundColor: const Color(0xFF1E293B),
+      side: const BorderSide(color: Colors.white30),
+      onPressed: () {
+        setState(() {
+          _destController.text = query;
+        });
+        _onDestSearchChanged(query);
+        announceSpeech('เลือกปลายทาง $query', true);
+      },
     );
   }
 
@@ -2029,6 +2715,30 @@ class _NavigationScreenState extends ConsumerState<NavigationScreen> with Ticker
       case RiskState.warning: return 'เฝ้าระวัง';
       case RiskState.highRisk: return 'เสี่ยงสูง';
       case RiskState.critical: return 'อันตราย!';
+    }
+  }
+
+  String _getGpsQualityLabel(GpsFixQuality quality) {
+    switch (quality) {
+      case GpsFixQuality.highPrecision: return 'ดาวเทียมตรง (GNSS)';
+      case GpsFixQuality.mediumPrecision: return 'Wi-Fi/A-GPS';
+      case GpsFixQuality.lowPrecision: return 'Cell Site (ขยายระยะเผื่อ)';
+    }
+  }
+
+  String _getCameraTriggerLabel(CameraTriggerState state) {
+    switch (state) {
+      case CameraTriggerState.sleep: return '💤 ปิดกล้อง (Sleep)';
+      case CameraTriggerState.prewarm: return '⚡ เตรียมพร้อม (Pre-warm)';
+      case CameraTriggerState.activeScanning: return '📷 สแกนจริง (YOLO11)';
+    }
+  }
+
+  Color _getCameraTriggerColor(CameraTriggerState state) {
+    switch (state) {
+      case CameraTriggerState.sleep: return Colors.grey;
+      case CameraTriggerState.prewarm: return Colors.orange;
+      case CameraTriggerState.activeScanning: return Colors.redAccent;
     }
   }
 
@@ -2284,12 +2994,14 @@ class _NavigationScreenState extends ConsumerState<NavigationScreen> with Ticker
       }
     }
 
-    // 3. ACCESSIBILITY POINTS (Elevators, Ramps, Tactile Paving)
+    // 3. ACCESSIBILITY POINTS (Elevators, Ramps, Tactile Paving, Traffic Lights, Zebra Crossings)
     for (final pt in _gisPoints) {
       final type = pt['type']?.toString().toLowerCase() ?? '';
       if (type == 'elevator' && !_filterElevators) continue;
       if (type == 'ramp' && !_filterRamps) continue;
       if (type == 'tactile' && !_filterTactilePaths) continue;
+      if (type == 'traffic_light' && !_filterTrafficLights) continue;
+      if (type == 'zebra_crossing' && !_filterZebraCrossings) continue;
 
       double? lat = (pt['lat'] as num?)?.toDouble();
       double? lon = (pt['lon'] as num?)?.toDouble();
@@ -2311,16 +3023,25 @@ class _NavigationScreenState extends ConsumerState<NavigationScreen> with Ticker
         iconData = Icons.alt_route_rounded;
         markerColor = Colors.amber[800]!;
         typeLabel = 'ทางนำสายตา (Tactile)';
+      } else if (type == 'traffic_light') {
+        iconData = Icons.traffic_rounded;
+        markerColor = Colors.deepOrange[800]!;
+        typeLabel = 'สี่แยกไฟแดง (Traffic Signal)';
+      } else if (type == 'zebra_crossing') {
+        iconData = Icons.transfer_within_a_station_rounded;
+        markerColor = const Color(0xFF1E3A8A);
+        typeLabel = 'ทางม้าลาย (Zebra Crossing)';
       }
 
       final double finalLat = lat;
       final double finalLon = lon;
+      final bool isWideBadge = (type == 'traffic_light' || type == 'zebra_crossing');
 
       markers.add(
         Marker(
           point: ll.LatLng(finalLat, finalLon),
-          width: 32,
-          height: 32,
+          width: isWideBadge ? 140 : 36,
+          height: isWideBadge ? 54 : 36,
           alignment: Alignment.center,
           child: GestureDetector(
             onTap: () {
@@ -2338,15 +3059,37 @@ class _NavigationScreenState extends ConsumerState<NavigationScreen> with Ticker
                 targetLon: finalLon,
               );
             },
-            child: Container(
-              decoration: BoxDecoration(
-                color: markerColor,
-                shape: BoxShape.circle,
-                border: Border.all(color: Colors.white, width: 2),
-                boxShadow: const [BoxShadow(color: Colors.black38, blurRadius: 4)],
-              ),
-              child: Icon(iconData, color: Colors.white, size: 18),
-            ),
+            child: isWideBadge
+                ? Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
+                        decoration: BoxDecoration(
+                          color: markerColor,
+                          borderRadius: BorderRadius.circular(6),
+                          border: Border.all(color: Colors.white, width: 1.2),
+                          boxShadow: const [BoxShadow(color: Colors.black38, blurRadius: 4)],
+                        ),
+                        child: Text(
+                          pt['name']?.toString().split('(').first.trim() ?? typeLabel,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(color: Colors.white, fontSize: 8.5, fontWeight: FontWeight.bold),
+                        ),
+                      ),
+                      Icon(iconData, color: markerColor, size: 22),
+                    ],
+                  )
+                : Container(
+                    decoration: BoxDecoration(
+                      color: markerColor,
+                      shape: BoxShape.circle,
+                      border: Border.all(color: Colors.white, width: 2),
+                      boxShadow: const [BoxShadow(color: Colors.black38, blurRadius: 4)],
+                    ),
+                    child: Icon(iconData, color: Colors.white, size: 18),
+                  ),
           ),
         ),
       );
@@ -2419,6 +3162,74 @@ class _NavigationScreenState extends ConsumerState<NavigationScreen> with Ticker
     }
 
     return markers;
+  }
+
+  List<Marker> _buildRouteDirectionMarkers(List<ll.LatLng> points, bool isHighContrast) {
+    if (points.length < 2) return [];
+    List<Marker> markers = [];
+    final int step = (points.length / 8).ceil().clamp(2, 25);
+    for (int i = 0; i < points.length - 1; i += step) {
+      final p1 = points[i];
+      final p2 = points[i + 1];
+      final double angle = math.atan2(p2.longitude - p1.longitude, p2.latitude - p1.latitude);
+      markers.add(
+        Marker(
+          point: p1,
+          width: 22,
+          height: 22,
+          alignment: Alignment.center,
+          child: Transform.rotate(
+            angle: angle,
+            child: Container(
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                color: isHighContrast ? Colors.yellowAccent : const Color(0xFF1E40AF),
+                boxShadow: const [BoxShadow(color: Colors.black26, blurRadius: 2)],
+              ),
+              child: Icon(
+                Icons.navigation_rounded,
+                size: 14,
+                color: isHighContrast ? Colors.black : Colors.white,
+              ),
+            ),
+          ),
+        ),
+      );
+    }
+    return markers;
+  }
+
+  String _getMapTileUrl(String style) {
+    switch (style) {
+      case 'guardian_cyber':
+        // Vibrant Humanitarian Style (Clean, soft purple-orange tones, high contrast pedestrian paths, 100% watermark free)
+        return 'https://{s}.tile.openstreetmap.fr/hot/{z}/{x}/{y}.png';
+      case 'minimal_slate':
+        // Esri Clean Slate Silver Canvas (Ultra-clean, modern, highlights all pins, 100% watermark free)
+        return 'https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Light_Gray_Base/MapServer/tile/{z}/{y}/{x}';
+      case 'midnight_neon':
+        // Esri Midnight Dark Charcoal Canvas (High contrast dark theme, 100% watermark free)
+        return 'https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Base/MapServer/tile/{z}/{y}/{x}';
+      case 'pedestrian_assist':
+        // CyclOSM Accessible Pedestrian & Wheelchair Cartography
+        return 'https://{s}.tile-cyclosm.openstreetmap.fr/cyclosm/{z}/{x}/{y}.png';
+      case 'traffic':
+        return 'https://{s}.google.com/vt/lyrs=m,traffic&hl=th&gl=th&x={x}&y={y}&z={z}';
+      case 'satellite':
+        return 'https://{s}.google.com/vt/lyrs=y&hl=th&gl=th&x={x}&y={y}&z={z}';
+      default:
+        return 'https://{s}.tile.openstreetmap.fr/hot/{z}/{x}/{y}.png';
+    }
+  }
+
+  List<String> _getMapSubdomains(String style) {
+    if (style == 'traffic' || style == 'satellite') {
+      return const ['mt0', 'mt1', 'mt2', 'mt3'];
+    }
+    if (style == 'minimal_slate' || style == 'midnight_neon') {
+      return const [];
+    }
+    return const ['a', 'b', 'c'];
   }
 
   void _showGisDetailModal({

@@ -180,6 +180,31 @@ class GisDataService {
     {'id': 'tactile_aphiwat', 'name': 'ทางนำสายตาคนตาบอด สถานีกลางกรุงเทพอภิวัฒน์', 'type': 'tactile', 'lat': 13.8040, 'lon': 100.5410, 'status': 'operational', 'detail': 'เส้นทางมาตรฐานสากลเชื่อมต่อไปยังทุกชานชาลา'},
     {'id': 'tactile_samyan', 'name': 'ทางนำสายตา อุโมงค์เชื่อมมิตรทาวน์ - MRT สามย่าน', 'type': 'tactile', 'lat': 13.7335, 'lon': 100.5288, 'status': 'operational', 'detail': 'ทางเดินบล็อกนำสายตาตลอดแนวอุโมงค์ติดแอร์'},
     {'id': 'tactile_donmueang_bridge', 'name': 'ทางนำสายตา สะพานเชื่อมสนามบินดอนเมือง - SRT ดอนเมือง', 'type': 'tactile', 'lat': 13.9165, 'lon': 100.6020, 'status': 'operational', 'detail': 'ทางเดินในร่มพร้อมเบรลล์บล็อก'},
+
+    // ─── 🚦 Traffic Light Intersections (สี่แยกสัญญาณไฟจราจร & ไฟคนข้ามมีเสียง) ───
+    {'id': 'int_bkk_siam', 'name': '🚦 สี่แยกสยาม (พญาไท - พระราม 1)', 'type': 'traffic_light', 'lat': 13.7461, 'lon': 100.5348, 'status': 'operational', 'detail': 'สี่แยกใหญ่ มีสัญญาณไฟคนข้ามพร้อมสัญญาณเสียงเตือน (Acoustic Pedestrian Signal)'},
+    {'id': 'int_bkk_ratchaprasong', 'name': '🚦 สี่แยกราชประสงค์ (ราชดำริ - พระราม 1)', 'type': 'traffic_light', 'lat': 13.7445, 'lon': 100.5400, 'status': 'operational', 'detail': 'สี่แยกหลักหน้าเซ็นทรัลเวิลด์ มีสัญญาณไฟคนข้ามถนน'},
+    {'id': 'int_bkk_asok', 'name': '🚦 สี่แยกอโศก-สุขุมวิท (สุขุมวิท 21)', 'type': 'traffic_light', 'lat': 13.7370, 'lon': 100.5605, 'status': 'operational', 'detail': 'สี่แยกอโศก สัญญาณไฟจราจรคนข้ามเชื่อมต่อ BTS อโศก และ MRT สุขุมวิท'},
+    {'id': 'int_bkk_rama9', 'name': '🚦 สี่แยกพระราม 9 (รัชดาภิเษก - พระราม 9)', 'type': 'traffic_light', 'lat': 13.7575, 'lon': 100.5655, 'status': 'operational', 'detail': 'สี่แยกฟอร์จูน / เซ็นทรัลพระราม 9 มีปุ่มกดสัญญาณไฟข้ามถนน'},
+    {'id': 'int_bkk_pathumwan', 'name': '🚦 สี่แยกปทุมวัน (MBK - หอศิลป์)', 'type': 'traffic_light', 'lat': 13.7465, 'lon': 100.5290, 'status': 'operational', 'detail': 'สี่แยกปทุมวัน มีทางม้าลายและสัญญาณไฟคนเดิน'},
+    {'id': 'int_bkk_saladaeng', 'name': '🚦 สี่แยกศาลาแดง (สีลม - พระราม 4)', 'type': 'traffic_light', 'lat': 13.7285, 'lon': 100.5350, 'status': 'operational', 'detail': 'สัญญาณไฟทางข้ามเชื่อมต่อสวนลุมพินีและ รพ.จุฬาฯ'},
+
+    // ─── Local / Campus Traffic Lights (พิกัดทดสอบ มทส. / โคราช) ───
+    {'id': 'int_sut_gate1', 'name': '🚦 สี่แยกไฟแดง ประตู 1 มทส. (ถ.มหาวิทยาลัย)', 'type': 'traffic_light', 'lat': 14.8810, 'lon': 102.0250, 'status': 'operational', 'detail': 'สัญญาณไฟจราจร 4 แยก มีปุ่มกดสัญญาณข้ามถนนคนพิการ'},
+    {'id': 'int_sut_circle', 'name': '🚦 สี่แยกวงเวียนสุรนิทัศน์ (หอดูดาว)', 'type': 'traffic_light', 'lat': 14.8775, 'lon': 102.0195, 'status': 'operational', 'detail': 'สัญญาณไฟทางข้ามความปลอดภัยสูง มีเสียงเตือนปี๊บๆ'},
+    {'id': 'int_sut_library', 'name': '🚦 สี่แยกหน้าสำนักหอสมุด มทส.', 'type': 'traffic_light', 'lat': 14.8760, 'lon': 102.0235, 'status': 'operational', 'detail': 'ทางแยกคนเดินเท้าเชื่อมต่ออาคารเรียนรวม'},
+
+    // ─── 🦓 Zebra Crossings / Crosswalks (ทางม้าลายคนข้ามถนน) ───
+    {'id': 'zbr_bkk_paragon', 'name': '🦓 ทางม้าลาย หน้าสยามพารากอน (ถ.พระราม 1)', 'type': 'zebra_crossing', 'lat': 13.7463, 'lon': 100.5350, 'status': 'operational', 'detail': 'ทางม้าลายเส้นนูนสะท้อนแสง มีเบรลล์บล็อกนำทางตรงเข้าสู่ห้าง'},
+    {'id': 'zbr_bkk_ctw', 'name': '🦓 ทางม้าลาย หน้าเซ็นทรัลเวิลด์ (ถ.ราชดำริ)', 'type': 'zebra_crossing', 'lat': 13.7450, 'lon': 100.5395, 'status': 'operational', 'detail': 'ทางม้าลายกว้าง 6 เมตร เชื่อมต่อระหว่างห้างและเกษรวิลเลจ'},
+    {'id': 'zbr_bkk_chula_hosp', 'name': '🦓 ทางม้าลาย ข้ามเข้า รพ.จุฬาลงกรณ์', 'type': 'zebra_crossing', 'lat': 13.7310, 'lon': 100.5350, 'status': 'operational', 'detail': 'ทางม้าลายยกระดับเสมอทางเท้า (Raised Crosswalk) วีลแชร์ข้ามสะดวก'},
+    {'id': 'zbr_bkk_asok', 'name': '🦓 ทางม้าลาย ข้ามแยกอโศก (หน้า Terminal 21)', 'type': 'zebra_crossing', 'lat': 13.7372, 'lon': 100.5608, 'status': 'operational', 'detail': 'ทางม้าลายพร้อมสัญญาณไฟข้ามถนน'},
+
+    // ─── Local / Campus Zebra Crossings (พิกัด มทส. / โคราช) ───
+    {'id': 'zbr_sut_c1', 'name': '🦓 ทางม้าลาย หน้าอาคารเรียนรวม 1 (C1)', 'type': 'zebra_crossing', 'lat': 14.8785, 'lon': 102.0210, 'status': 'operational', 'detail': 'ทางม้าลายเส้นนูนลดความเร็ว มีบล็อกเตือนหยุดที่ขอบถนน'},
+    {'id': 'zbr_sut_dorm', 'name': '🦓 ทางม้าลาย ข้ามไปหอพักสุรนิเวศ', 'type': 'zebra_crossing', 'lat': 14.8770, 'lon': 102.0180, 'status': 'operational', 'detail': 'ทางม้าลายพร้อมทางลาดเชื่อมต่อฟุตบาท 2 ฝั่ง'},
+    {'id': 'zbr_sut_canteen', 'name': '🦓 ทางม้าลาย หน้าโรงอาหารกลาง', 'type': 'zebra_crossing', 'lat': 14.8750, 'lon': 102.0215, 'status': 'operational', 'detail': 'ทางม้าลายยกระดับความเร็วต่ำ วีลแชร์ข้ามได้ระดับเดียวกับพื้น'},
+    {'id': 'zbr_sut_admin', 'name': '🦓 ทางม้าลาย หน้าอาคารบริหาร มทส.', 'type': 'zebra_crossing', 'lat': 14.8795, 'lon': 102.0230, 'status': 'operational', 'detail': 'ทางม้าลายเชื่อมต่ออาคารสำนักงานอธิการบดี'},
   ];
 
   // ══════════════════════════════════════════════════════════════
@@ -464,6 +489,48 @@ class GisDataService {
       'lat': 13.7120,
       'lon': 100.5720,
       'instruction': 'ทางเท้าชำรุดจากรถบรรทุกหนัก ระวังพื้นลื่น',
+    },
+
+    // ─── 4.6 Local Campus & Suranaree Barriers (พิกัดทดสอบ มทส. / โคราช) ───
+    {
+      'id': 'bar_sut_hole',
+      'name': '⚠️ ฝาท่อระบายน้ำชำรุด หน้าอาคารวิชาการ 1',
+      'type': 'hole_hazard',
+      'severity': 'high',
+      'severity_text': 'อันตรายสูง: ฝาท่อเหล็กแตกหักลึก 35 ซม.',
+      'lat': 14.8790,
+      'lon': 102.0225,
+      'instruction': 'มีหลุมลึกบนทางเท้า ไม้เท้าขาวหรือล้อวีลแชร์อาจตกร่อง ให้เดินชิดฝั่งขวา',
+    },
+    {
+      'id': 'bar_sut_pole',
+      'name': '⚠️ เสาป้ายบอกทางล้ำเข้ามากลางทางเท้า (ทางไปหอพักสุรนิเวศ)',
+      'type': 'pole_obstacle',
+      'severity': 'medium',
+      'severity_text': 'สิ่งกีดขวางระดับอก (ความกว้างเหลือ 55 ซม.)',
+      'lat': 14.8765,
+      'lon': 102.0200,
+      'instruction': 'เสาเหล็กป้ายบอกทางยื่นขวางทางเดิน ผู้พิการทางสายตาควรใช้ไม้เท้าตรวจจับ',
+    },
+    {
+      'id': 'bar_sut_broken',
+      'name': '⚠️ บล็อกปูถนนยุบตัวและมีน้ำขัง ทางเดินหน้าโรงอาหาร',
+      'type': 'broken_sidewalk',
+      'severity': 'medium',
+      'severity_text': 'พื้นทางเท้าต่างระดับ แผ่นปูนกระดก',
+      'lat': 14.8755,
+      'lon': 102.0175,
+      'instruction': 'กระเบื้องปูพื้นชำรุด ระวังสะดุดล้มหรือพื้นลื่น',
+    },
+    {
+      'id': 'bar_sut_stairs',
+      'name': '⚠️ บันได 4 ขั้นหน้าอาคาร ไม่มีทางลาด',
+      'type': 'stairs_hazard',
+      'severity': 'high',
+      'severity_text': 'บันไดต่างระดับ ไม่มีทางลาดมาตรฐาน',
+      'lat': 14.8772,
+      'lon': 102.0220,
+      'instruction': 'วีลแชร์ผ่านไม่ได้ แนะนำอ้อมไปใช้ทางลาดด้านข้างอาคารบรรณสาร',
     },
   ];
 }

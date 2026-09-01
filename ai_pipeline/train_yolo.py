@@ -9,20 +9,19 @@ os.environ["MLFLOW_ALLOW_FILE_STORE"] = "true"
 def train_and_export():
     # Parse command line arguments
     parser = argparse.ArgumentParser(description="Train YOLO11n on merged accessibility datasets.")
-    parser.add_argument("--epochs", type=int, default=50, help="Number of training epochs")
+    parser.add_argument("--epochs", type=int, default=150, help="Number of training epochs")
     args = parser.parse_args()
 
-    # 1. Resolve project root paths
-    script_dir = os.path.dirname(os.path.abspath(__file__))
-    project_root = os.path.abspath(os.path.join(script_dir, ".."))
-    dataset_yaml = os.path.join(project_root, "datasets", "merged", "data.yaml")
-    if not os.path.exists(dataset_yaml):
-        print(f"Error: Merged dataset config not found at {dataset_yaml}. Run merge_labels.py first.")
-        return
+    # 1. Load a pretrained lightweight YOLO11n model
+    model = YOLO("yolo11n.pt") 
 
-    # 2. Load a pretrained lightweight YOLO11n model
-    model_weight = os.path.join(project_root, "yolo11n.pt")
-    model = YOLO(model_weight if os.path.exists(model_weight) else "yolo11n.pt")
+    # 2. Train the model using the merged dataset configurations
+    dataset_yaml = os.path.abspath("datasets/merged_accessibility/data.yaml")
+    if not os.path.exists(dataset_yaml):
+        dataset_yaml = os.path.abspath("datasets/merged_3classes/data.yaml")
+    if not os.path.exists(dataset_yaml):
+        print(f"Error: Merged dataset config not found.")
+        return
 
     # Check device availability
     device = 0 if torch.cuda.is_available() else "cpu"

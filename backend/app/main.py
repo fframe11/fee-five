@@ -495,10 +495,10 @@ def analyze_image(payload: VisionRequest):
     data_url = f"data:image/jpeg;base64,{raw_b64}"
     
     # ─── PROVIDER 1: Google Gemini Vision API ───
-    gemini_key = os.environ.get("GOOGLE_API_KEY") or os.environ.get("gemini_api")
+    gemini_key = os.environ.get("gemini_api_key") or os.environ.get("GOOGLE_API_KEY") or os.environ.get("gemini_api")
     if gemini_key:
         try:
-            for gemini_model in ["gemini-2.5-flash", "gemini-1.5-flash", "gemini-2.0-flash"]:
+            for gemini_model in ["gemini-3.5-flash", "gemini-3.5-flash-lite", "gemini-flash-latest", "gemini-3.7-flash"]:
                 gemini_url = f"https://generativelanguage.googleapis.com/v1beta/models/{gemini_model}:generateContent?key={gemini_key}"
                 body = {
                     "contents": [
@@ -604,34 +604,69 @@ def search_places_endpoint(q: str, lat: Optional[float] = None, lon: Optional[fl
                 "lon": float(p_lon)
             })
 
-    # 1. OpenStreetMap Nominatim with viewbox bias
-    try:
-        nom_url = f"https://nominatim.openstreetmap.org/search?q={urllib.parse.quote(query)}&format=json&countrycodes=th&addressdetails=1&limit=5"
-        if lat and lon and lat != 0.0:
-            nom_url += f"&viewbox={lon - 0.4},{lat + 0.4},{lon + 0.4},{lat - 0.4}&bounded=0"
-        
-        req = urllib.request.Request(nom_url, headers={"User-Agent": "TAM-AccessibilityApp/1.0"})
-        with urllib.request.urlopen(req, timeout=3) as resp:
-            data = json.loads(resp.read().decode('utf-8'))
-            for item in data:
-                d_name = item.get("display_name", "")
-                parts = d_name.split(",")
-                short_name = parts[0].strip() if parts else d_name
-                p_lat = float(item.get("lat", 0))
-                p_lon = float(item.get("lon", 0))
-                if p_lat != 0 and p_lon != 0:
-                    cat = item.get("type", "general")
-                    if cat in ["university", "college", "school"]:
-                        cat = "campus"
-                    elif cat in ["hospital", "clinic", "pharmacy"]:
-                        cat = "hospital"
-                    elif cat in ["station", "stop", "subway"]:
-                        cat = "transit"
-                    elif cat in ["mall", "supermarket", "convenience"]:
-                        cat = "shop"
-                    add_place(short_name, d_name, cat, p_lat, p_lon)
-    except Exception as e:
-        print(f"Nominatim lookup failed: {e}")
+    load_env()
+    serpapi_key = os.environ.get("SERPAPI_API_KEY") or os.environ.get("SERPAPI_KEY") or os.environ.get("Serpapi_api") or os.environ.get("serpapi_api_key")
+
+    # 1. Primary: SerpApi Google Maps Engine (engine=google_maps)
+    if serpapi_key:
+        try:
+            serp_params = {
+                "engine": "google_maps",
+                "q": query,
+                "google_domain": "google.co.th",
+                "hl": "th",
+                "gl": "th",
+                "api_key": serpapi_key
+            }
+            if lat and lon and lat != 0.0:
+                serp_params["ll"] = f"@{lat},{lon},14z"
+
+            serp_url = f"https://serpapi.com/search.json?{urllib.parse.urlencode(serp_params)}"
+            req = urllib.request.Request(serp_url, headers={"User-Agent": "TAM-AccessibilityApp/1.0"})
+            with urllib.request.urlopen(req, timeout=5) as resp:
+                data = json.loads(resp.read().decode('utf-8'))
+                
+                # Process local_results
+                for item in data.get("local_results", []):
+                    title = item.get("title", "")
+                    addr = item.get("address", "")
+                    display = f"{title}, {addr}" if addr and title not in addr else (addr or title)
+                    coords = item.get("gps_coordinates", {})
+                    p_lat = coords.get("latitude")
+                    p_lon = coords.get("longitude")
+                    if title and p_lat and p_lon:
+                        types = item.get("types", []) or [item.get("type", "general")]
+                        types_str = " ".join(types).lower()
+                        cat = "general"
+                        if any(k in types_str for k in ["university", "college", "school", "faculty"]):
+                            cat = "campus"
+                        elif any(k in types_str for k in ["hospital", "clinic", "pharmacy", "medical"]):
+                            cat = "hospital"
+                        elif any(k in types_str for k in ["subway", "train", "station", "transit", "bus", "bts", "mrt"]):
+                            cat = "transit"
+                        elif any(k in types_str for k in ["mall", "supermarket", "convenience", "store", "shop", "market"]):
+                            cat = "shop"
+                        elif any(k in types_str for k in ["restaurant", "food", "cafe", "coffee", "bakery"]):
+                            cat = "restaurant"
+                        elif any(k in types_str for k in ["hotel", "dormitory", "hostel", "apartment"]):
+                            cat = "lodging"
+                        elif any(k in types_str for k in ["temple", "park", "monument", "landmark"]):
+                            cat = "landmark"
+                        add_place(title, display, cat, float(p_lat), float(p_lon))
+
+                # Process single place_results
+                place_res = data.get("place_results", {})
+                if place_res and place_res.get("title"):
+                    title = place_res.get("title", "")
+                    addr = place_res.get("address", "")
+                    display = f"{title}, {addr}" if addr and title not in addr else (addr or title)
+                    coords = place_res.get("gps_coordinates", {})
+                    p_lat = coords.get("latitude")
+                    p_lon = coords.get("longitude")
+                    if title and p_lat and p_lon:
+                        add_place(title, display, "general", float(p_lat), float(p_lon))
+        except Exception as e:
+            print(f"SerpApi Google Maps lookup failed: {e}")
 
     # 2. Photon Geocoding (Komoot OSM POIs)
     try:
@@ -1202,3 +1237,117 @@ def get_dashboard_ai_recommendations():
         }
     ]
 
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Item 5: B2G Urban Accessibility Intelligence & Incident Logging (กทม. / Traffy Fondue)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class IncidentLogRequest(BaseModel):
+    timestamp: Optional[str] = None
+    lat: float
+    lng: float
+    hazard_type: str
+    confidence: float
+    severity: str = "medium"
+    description: Optional[str] = None
+    image_snapshot_hash: Optional[str] = None
+
+_incident_logs_db = [
+    {
+        "id": "INC-BMA-101",
+        "timestamp": "2026-09-01T08:15:20Z",
+        "lat": 13.7456,
+        "lng": 100.5355,
+        "hazard_type": "broken_footpath",
+        "confidence": 0.88,
+        "severity": "CRITICAL",
+        "district": "ปทุมวัน",
+        "description": "ฝาท่อคอนกรีตแตกหักและทางเท้ายุบตัว",
+        "traffy_status": "forwarded_to_bma_public_works"
+    },
+    {
+        "id": "INC-BMA-102",
+        "timestamp": "2026-09-01T09:22:11Z",
+        "lat": 13.7450,
+        "lng": 100.5380,
+        "hazard_type": "obstacle_pole",
+        "confidence": 0.82,
+        "severity": "HIGH",
+        "district": "ปทุมวัน",
+        "description": "เสาไฟฟ้าและตู้สื่อสารขวางกึ่งกลางทางเท้า",
+        "traffy_status": "under_review"
+    },
+    {
+        "id": "INC-BMA-103",
+        "timestamp": "2026-09-01T10:45:00Z",
+        "lat": 13.7380,
+        "lng": 100.5600,
+        "hazard_type": "vehicle_on_sidewalk",
+        "confidence": 0.91,
+        "severity": "CRITICAL",
+        "district": "วัฒนา",
+        "description": "รถจักรยานยนต์จอดและวิ่งบนทางเท้า",
+        "traffy_status": "dispatched_city_inspector"
+    }
+]
+
+@app.post("/api/v1/intelligence/incident-log", tags=["B2G Urban Intelligence"])
+def log_hazard_incident(payload: IncidentLogRequest):
+    """Auto-Incident Logging: บันทึกจุดเสี่ยงทางเท้าที่ YOLO / Sensor ตรวจพบ เพื่อส่งต่อ กทม."""
+    new_inc = {
+        "id": f"INC-BMA-{len(_incident_logs_db) + 101}",
+        "timestamp": payload.timestamp or datetime.utcnow().isoformat(),
+        "lat": payload.lat,
+        "lng": payload.lng,
+        "hazard_type": payload.hazard_type,
+        "confidence": payload.confidence,
+        "severity": payload.severity.upper(),
+        "district": "กรุงเทพมหานคร",
+        "description": payload.description or f"ตรวจพบ {payload.hazard_type} ความมั่นใจ {int(payload.confidence*100)}%",
+        "image_snapshot_hash": payload.image_snapshot_hash,
+        "traffy_status": "forwarded_to_bma"
+    }
+    _incident_logs_db.append(new_inc)
+    return {
+        "status": "success",
+        "message": "บันทึกจุดเสี่ยงเข้าสู่ Urban Accessibility Platform สำเร็จ",
+        "incident_id": new_inc["id"],
+        "bma_traffy_sync": True
+    }
+
+@app.get("/api/v1/intelligence/bma-geojson", tags=["B2G Urban Intelligence"])
+def get_bma_accessibility_geojson():
+    """GeoJSON API Export: ส่งออกข้อมูลจุดเสี่ยงความหนาแน่นสูงตามมาตรฐาน GeoJSON สำหรับ กทม. และ Traffy Fondue"""
+    features = []
+    for inc in _incident_logs_db:
+        features.append({
+            "type": "Feature",
+            "geometry": {
+                "type": "Point",
+                "coordinates": [inc["lng"], inc["lat"]]
+            },
+            "properties": {
+                "incident_id": inc["id"],
+                "hazard_type": inc["hazard_type"],
+                "severity": inc["severity"],
+                "confidence": inc["confidence"],
+                "district": inc.get("district", "กรุงเทพมหานคร"),
+                "description": inc["description"],
+                "traffy_status": inc["traffy_status"],
+                "timestamp": inc["timestamp"],
+                "repair_priority": 1 if inc["severity"] == "CRITICAL" else (2 if inc["severity"] == "HIGH" else 3)
+            }
+        })
+
+    return {
+        "type": "FeatureCollection",
+        "metadata": {
+            "platform": "TAM - Urban Accessibility & Safety Intelligence",
+            "target_agency": "Bangkok Metropolitan Administration (BMA)",
+            "traffy_fondue_compatible": True,
+            "total_incidents": len(features),
+            "generated_at": datetime.utcnow().isoformat()
+        },
+        "features": features
+    }

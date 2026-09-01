@@ -115,50 +115,155 @@ def _build_user_message(event: AgentEvent, context_summary: str) -> str:
 # ---------------------------------------------------------------------------
 # LLM Call (Groq)
 # ---------------------------------------------------------------------------
-def _load_api_key() -> Optional[str]:
-    for path in ["../.env", "../../.env", ".env"]:
+def _load_gemini_key() -> Optional[str]:
+    for path in ["../.env", "../../.env", ".env", "c:/AccessGuardian AI/.env"]:
         if os.path.exists(path):
             try:
                 with open(path, "r", encoding="utf-8") as f:
                     for line in f:
                         if "=" in line and not line.strip().startswith("#"):
                             k, v = line.strip().split("=", 1)
-                            if k.strip() in ("Groq_api", "GROQ_API_KEY"):
+                            if k.strip() in ("gemini_api_key", "GEMINI_API_KEY", "GOOGLE_API_KEY", "gemini_api"):
                                 return v.strip()
             except Exception:
                 pass
-    return os.environ.get("Groq_api") or os.environ.get("GROQ_API_KEY")
+    return os.environ.get("gemini_api_key") or os.environ.get("GOOGLE_API_KEY") or os.environ.get("gemini_api")
 
-
-def _call_llm(system_prompt: str, user_message: str) -> dict:
-    api_key = _load_api_key()
-    if not api_key:
-        raise RuntimeError("GROQ_API_KEY not found in .env")
-
-    payload = {
-        "model": "llama-3.1-70b-versatile",
-        "messages": [
-            {"role": "system", "content": system_prompt},
-            {"role": "user",   "content": user_message},
-        ],
-        "temperature": 0.1,
-        "max_tokens": 800,
-        "response_format": {"type": "json_object"},
+def _rule_based_fallback(user_message: str) -> dict:
+    """Universal rule-based intent fallback when network is unavailable."""
+    msg = user_message.lower()
+    
+    if any(w in msg for w in ["พาไป", "นำทางไป", "ไปที่", "เดินทางไป", "กลับบ้าน"]):
+        # Extract destination
+        dest = "จุดหมายปลายทาง"
+        for w in ["พาไป", "นำทางไป", "ไปที่", "เดินทางไป"]:
+            if w in msg:
+                dest = user_message.split(w, 1)[1].strip()
+                break
+        return {
+            "thought": "ผู้ใช้ต้องการนำทางไปยังเป้าหมาย",
+            "action": "start_navigation",
+            "action_args": {"destination": dest},
+            "confidence": 0.95,
+            "user_message": f"กำลังเริ่มนำทางไป{dest} ผ่านเส้นทางที่ปลอดภัยค่ะ"
+        }
+        
+    elif any(w in msg for w in ["หยุดนำทาง", "ยกเลิกการนำทาง", "หยุด", "พอแล้ว"]):
+        return {
+            "thought": "ผู้ใช้ต้องการหยุดการนำทาง",
+            "action": "stop_navigation",
+            "action_args": {},
+            "confidence": 0.98,
+            "user_message": "หยุดการนำทางเรียบร้อยแล้วค่ะ"
+        }
+        
+    elif any(w in msg for w in ["ลิฟต์", "ลิฟท์", "ทางลาด", "ห้องน้ำ", "สถานี", "บันไดเลื่อน"]):
+        f_type = "elevator" if ("ลิฟต์" in msg or "ลิฟท์" in msg) else ("ramp" if "ทางลาด" in msg else ("toilet" if "ห้องน้ำ" in msg else "bts"))
+        return {
+            "thought": f"ผู้ใช้กำลังค้นหาสิ่งอำนวยความสะดวก: {f_type}",
+            "action": "find_nearest_facility",
+            "action_args": {"facility_type": f_type},
+            "confidence": 0.92,
+            "user_message": f"กำลังค้นหา{f_type}ที่ใกล้ที่สุดและเข้าถึงได้สะดวกให้ค่ะ"
+        }
+        
+    elif any(w in msg for w in ["ช่วยด้วย", "ฉุกเฉิน", "ล้ม", "sos", "เกิดอุบัติเหตุ", "โทรหา"]):
+        return {
+            "thought": "ตรวจพบคำสั่งขอความช่วยเหลือฉุกเฉิน",
+            "action": "trigger_sos",
+            "action_args": {"reason": "ผู้ใช้ร้องขอความช่วยเหลือด้วยเสียง", "trigger_method": "voice"},
+            "confidence": 0.99,
+            "user_message": "กำลังส่งสัญญาณฉุกเฉินและแจ้งผู้ดูแลให้ทันทีค่ะ"
+        }
+        
+    elif any(w in msg for w in ["แจ้ง กทม", "แจ้งซ่อม", "ทางเท้าพัง", "ฝาท่อแตก", "หลุม"]):
+        return {
+            "thought": "ผู้ใช้ต้องการแจ้งซ่อมจุดเสี่ยงให้ กทม.",
+            "action": "report_hazard_to_bma",
+            "action_args": {"hazard_type": "broken_footpath", "description": user_message},
+            "confidence": 0.95,
+            "user_message": "บันทึกพิกัดและส่งเรื่องแจ้งซ่อมให้ กทม. ผ่าน Traffy Fondue เรียบร้อยแล้วค่ะ"
+        }
+        
+    elif any(w in msg for w in ["เปิดกล้อง", "มองรอบๆ", "อ่านป้าย", "มีอะไรขวาง"]):
+        return {
+            "thought": "ผู้ใช้ต้องการตรวจสอบภาพและสภาพแวดล้อม",
+            "action": "suggest_camera_scan",
+            "action_args": {"reason": "ผู้ใช้ร้องขอตรวจสอบสภาพแวดล้อม", "risk_zone_description": "พื้นที่ด้านหน้า"},
+            "confidence": 0.90,
+            "user_message": "เปิดกล้องเพื่อวิเคราะห์สิ่งกีดขวางและสภาพแวดล้อมให้แล้วค่ะ"
+        }
+        
+    return {
+        "thought": "คำสั่งทั่วไป",
+        "action": "none",
+        "action_args": {},
+        "confidence": 0.80,
+        "user_message": "รับทราบค่ะ TAM AI พร้อมช่วยเหลือคุณในการเดินทางเสมอค่ะ"
     }
 
-    req = urllib.request.Request(
-        "https://api.groq.com/openai/v1/chat/completions",
-        data=json.dumps(payload).encode("utf-8"),
-        headers={
-            "Authorization": f"Bearer {api_key}",
-            "Content-Type": "application/json",
-        },
-        method="POST",
-    )
-    with urllib.request.urlopen(req, timeout=15) as resp:
-        body = json.loads(resp.read().decode("utf-8"))
-        content = body["choices"][0]["message"]["content"]
-        return json.loads(content)
+def _call_llm(system_prompt: str, user_message: str) -> dict:
+    # ─── PRIMARY PROVIDER: Google Gemini (3.5-flash / 3.7-flash) ───
+    gemini_key = _load_gemini_key()
+    if gemini_key:
+        for model_name in ["gemini-3.5-flash", "gemini-3.7-flash", "gemini-flash-latest"]:
+            try:
+                url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:generateContent?key={gemini_key}"
+                full_prompt = f"{system_prompt}\n\nUser Event / Voice Command:\n{user_message}\n\nRespond strictly with JSON matching the required schema."
+                payload = {
+                    "contents": [{"parts": [{"text": full_prompt}]}],
+                    "generationConfig": {
+                        "temperature": 0.1,
+                        "responseMimeType": "application/json"
+                    }
+                }
+                req = urllib.request.Request(
+                    url,
+                    data=json.dumps(payload).encode("utf-8"),
+                    headers={"Content-Type": "application/json"},
+                    method="POST"
+                )
+                with urllib.request.urlopen(req, timeout=8) as resp:
+                    data = json.loads(resp.read().decode("utf-8"))
+                    text = data["candidates"][0]["content"]["parts"][0]["text"].strip()
+                    if text.startswith("```"):
+                        text = re.sub(r"^```[a-zA-Z]*\n", "", text)
+                        text = re.sub(r"\n```$", "", text)
+                    return json.loads(text)
+            except Exception as e:
+                print(f"[Agent Brain] Gemini ({model_name}) error: {e}")
+
+    # ─── SECONDARY FALLBACK: Groq LLaMA-3.3 70B ───
+    groq_key = _load_api_key()
+    if groq_key:
+        try:
+            payload = {
+                "model": "llama-3.3-70b-versatile",
+                "messages": [
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user",   "content": user_message},
+                ],
+                "temperature": 0.1,
+                "max_tokens": 800,
+                "response_format": {"type": "json_object"},
+            }
+            req = urllib.request.Request(
+                "https://api.groq.com/openai/v1/chat/completions",
+                data=json.dumps(payload).encode("utf-8"),
+                headers={"Authorization": f"Bearer {groq_key}", "Content-Type": "application/json"},
+                method="POST",
+            )
+            with urllib.request.urlopen(req, timeout=5) as resp:
+                body = json.loads(resp.read().decode("utf-8"))
+                content = body["choices"][0]["message"]["content"]
+                return json.loads(content)
+        except Exception as e:
+            print(f"[Agent Brain] Groq fallback error: {e}")
+
+    # ─── TERTIARY OFFLINE FALLBACK: Instant Rule-based Intent Engine ───
+    print("[Agent Brain] Switching to Zero-Latency Local Intent Fallback.")
+    return _rule_based_fallback(user_message)
+
 
 
 # ---------------------------------------------------------------------------

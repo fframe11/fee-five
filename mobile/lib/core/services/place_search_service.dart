@@ -546,33 +546,51 @@ class PlaceSearchService {
       }
     } catch (_) {}
 
-    // 3. Direct Online Geocoding via Nominatim (Fallback)
+    // 3. Direct Online Geocoding via SerpApi Google Maps (Fallback)
     if (results.length < 3) {
       try {
-        String nominatimUrl = 'https://nominatim.openstreetmap.org/search?q=' + Uri.encodeComponent(query) + '&format=json&countrycodes=th&addressdetails=1&limit=6';
-        if (userLat != null && userLon != null && userLat != 0.0) {
-          final left = userLon - 0.5;
-          final right = userLon + 0.5;
-          final top = userLat + 0.5;
-          final bottom = userLat - 0.5;
-          nominatimUrl += '&viewbox=' + left.toString() + ',' + top.toString() + ',' + right.toString() + ',' + bottom.toString() + '&bounded=0';
-        }
+        const serpapiKey = String.fromEnvironment('SERPAPI_API_KEY', defaultValue: '');
+        if (serpapiKey.isNotEmpty) {
+          String serpUrl = 'https://serpapi.com/search.json?engine=google_maps&q=' + Uri.encodeComponent(query) + '&google_domain=google.co.th&hl=th&gl=th&api_key=' + serpapiKey;
+          if (userLat != null && userLon != null && userLat != 0.0) {
+            serpUrl += '&ll=@$userLat,$userLon,14z';
+          }
 
-        final resp = await http.get(
-          Uri.parse(nominatimUrl),
-          headers: {'User-Agent': 'TAM-AccessibilityApp/1.0'},
-        ).timeout(const Duration(seconds: 3));
+          final resp = await http.get(
+            Uri.parse(serpUrl),
+            headers: {'User-Agent': 'TAM-AccessibilityApp/1.0'},
+          ).timeout(const Duration(seconds: 4));
 
-        if (resp.statusCode == 200) {
-          final List<dynamic> data = jsonDecode(resp.body);
-          for (var item in data) {
-            final dName = item['display_name'] as String? ?? '';
-            final parts = dName.split(',');
-            final shortName = parts.isNotEmpty ? parts[0].trim() : dName;
-            final lat = double.tryParse(item['lat'].toString()) ?? 0.0;
-            final lon = double.tryParse(item['lon'].toString()) ?? 0.0;
+          if (resp.statusCode == 200) {
+            final Map<String, dynamic> data = jsonDecode(utf8.decode(resp.bodyBytes));
+            final localResults = data['local_results'] as List<dynamic>?;
+            if (localResults != null) {
+              for (var item in localResults) {
+                final title = item['title'] as String? ?? '';
+                final addr = item['address'] as String? ?? '';
+                final display = addr.isNotEmpty && !addr.contains(title) ? '$title, $addr' : (addr.isNotEmpty ? addr : title);
+                final coords = item['gps_coordinates'] as Map<String, dynamic>? ?? {};
+                final lat = double.tryParse(coords['latitude']?.toString() ?? '0') ?? 0.0;
+                final lon = double.tryParse(coords['longitude']?.toString() ?? '0') ?? 0.0;
+                
+                final types = (item['types'] as List<dynamic>?)?.cast<String>() ?? [(item['type'] as String? ?? 'general')];
+                final typesStr = types.join(' ').toLowerCase();
+                String cat = 'general';
+                if (typesStr.contains('university') || typesStr.contains('school')) {
+                  cat = 'campus';
+                } else if (typesStr.contains('hospital') || typesStr.contains('clinic')) {
+                  cat = 'hospital';
+                } else if (typesStr.contains('transit') || typesStr.contains('station') || typesStr.contains('subway') || typesStr.contains('bts') || typesStr.contains('mrt')) {
+                  cat = 'transit';
+                } else if (typesStr.contains('mall') || typesStr.contains('shop') || typesStr.contains('market') || typesStr.contains('store')) {
+                  cat = 'shop';
+                } else if (typesStr.contains('restaurant') || typesStr.contains('cafe') || typesStr.contains('food')) {
+                  cat = 'restaurant';
+                }
 
-            addResult(shortName, dName, 'general', lat, lon);
+                addResult(title, display, cat, lat, lon);
+              }
+            }
           }
         }
       } catch (_) {}
