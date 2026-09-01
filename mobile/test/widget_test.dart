@@ -15,7 +15,7 @@ void main() {
     );
 
     // Verify SplashScreen title and subtitle elements exist on start
-    expect(find.text('Accessibility Assistant'), findsOneWidget);
+    expect(find.text('TAM'), findsOneWidget);
     expect(find.text('ผู้ช่วยอัจฉริยะเพื่อการเข้าถึง'), findsOneWidget);
 
     // Advance time to trigger and finish the navigation delay
@@ -34,7 +34,7 @@ void main() {
     );
 
     // Verify first slide title and navigation buttons
-    expect(find.text('ระบบคำแนะนำทางสายตา'), findsOneWidget);
+    expect(find.text('กล้อง AI ตรวจสิ่งกีดขวาง'), findsOneWidget);
     expect(find.text('ข้าม'), findsOneWidget);
     expect(find.text('ถัดไป'), findsOneWidget);
   });

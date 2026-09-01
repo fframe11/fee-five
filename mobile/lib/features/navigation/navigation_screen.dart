@@ -663,15 +663,19 @@ class _NavigationScreenState extends ConsumerState<NavigationScreen> with Ticker
     });
 
     // ═══ 4. Real-time GPS Stream Navigation Loop ═══
-    int stepIdx = 0;
+    int stepIdx = (osrmRoute != null && osrmRoute.steps.length > 1) ? 1 : 0;
     _liveGpsSubscription?.cancel();
     _liveGpsSubscription = Geolocator.getPositionStream(
       locationSettings: const LocationSettings(
         accuracy: LocationAccuracy.high,
-        distanceFilter: 2,
+        distanceFilter: 3, // slightly higher to reduce micro-jitters
       ),
     ).listen((Position pos) {
       if (!mounted || !_isNavigating) return;
+
+      // ป้องกัน GPS ผีหลอก (Jitter Filter)
+      if (pos.accuracy > 25.0) return; // ข้ามจุดที่ความแม่นยำต่ำ
+      if (pos.speed < 0.2) return; // ข้ามจุดที่ยืนนิ่ง (ความเร็วต่ำกว่า 0.2 m/s)
 
       final currentLat = pos.latitude;
       final currentLng = pos.longitude;

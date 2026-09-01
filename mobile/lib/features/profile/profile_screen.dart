@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../../core/accessibility_notifier.dart';
 import '../../core/app_colors.dart';
+import '../../core/services/haptic_service.dart';
 
 class ProfileScreen extends ConsumerStatefulWidget {
   const ProfileScreen({super.key});
@@ -12,8 +13,6 @@ class ProfileScreen extends ConsumerStatefulWidget {
 }
 
 class _ProfileScreenState extends ConsumerState<ProfileScreen> {
-  String _selectedLanguage = 'th';
-
   final List<Map<String, String>> _contacts = [
     {'name': 'คุณแม่ (Mother)', 'phone': '0891234567'},
     {'name': 'หน่วยแพทย์ฉุกเฉิน', 'phone': '1669'},
@@ -73,6 +72,7 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                       'phone': phoneController.text,
                     });
                   });
+                  HapticService().turnGuidance();
                   Navigator.pop(context);
                 }
               },
@@ -88,6 +88,7 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
     setState(() {
       _contacts.removeAt(index);
     });
+    HapticService().turnGuidance();
   }
 
   @override
@@ -105,18 +106,19 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
         backgroundColor: isHighContrast ? Colors.black : Theme.of(context).colorScheme.primary,
         foregroundColor: Colors.white,
       ),
-      backgroundColor: isHighContrast ? Colors.black : Colors.grey[50],
+      backgroundColor: isHighContrast ? Colors.black : const Color(0xFFF1F5F9),
       body: SingleChildScrollView(
+        physics: const BouncingScrollPhysics(),
         padding: const EdgeInsets.all(16.0),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            // User Profile Section
+            // 1. User Profile Section
             Semantics(
               label: 'ส่วนข้อมูลผู้ใช้',
               child: Card(
                 color: isHighContrast ? Colors.black : Colors.white,
-                shape: isHighContrast ? const RoundedRectangleBorder(side: BorderSide(color: Colors.white)) : null,
+                shape: isHighContrast ? const RoundedRectangleBorder(side: BorderSide(color: Colors.white, width: 2)) : null,
                 child: Padding(
                   padding: const EdgeInsets.all(16.0),
                   child: Row(
@@ -125,15 +127,15 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                         borderRadius: BorderRadius.circular(36),
                         child: Image.asset(
                           'assets/icon_in_app.png',
-                          width: 72,
-                          height: 72,
+                          width: 68,
+                          height: 68,
                           fit: BoxFit.cover,
                           errorBuilder: (_, __, ___) => CircleAvatar(
-                            radius: 36,
-                            backgroundColor: isHighContrast ? Colors.white : Theme.of(context).colorScheme.primary.withOpacity(0.1),
+                            radius: 34,
+                            backgroundColor: isHighContrast ? Colors.white : Theme.of(context).colorScheme.primary.withValues(alpha: 0.1),
                             child: Icon(
                               Icons.person,
-                              size: 48,
+                              size: 44,
                               color: isHighContrast ? Colors.black : Theme.of(context).colorScheme.primary,
                             ),
                           ),
@@ -145,18 +147,18 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
                             Text(
-                              'ผู้ใช้งานตัวอย่าง',
+                              acc.userName.isNotEmpty ? acc.userName : 'ผู้ใช้งาน TAM AI',
                               style: TextStyle(
-                                fontSize: 20 * acc.fontScale,
+                                fontSize: 19 * acc.fontScale,
                                 fontWeight: FontWeight.bold,
                                 color: isHighContrast ? Colors.white : Colors.black87,
                               ),
                             ),
                             const SizedBox(height: 4.0),
                             Text(
-                              'user@example.com',
+                              acc.userEmail.isNotEmpty ? acc.userEmail : 'tam-user@example.com',
                               style: TextStyle(
-                                fontSize: 14 * acc.fontScale,
+                                fontSize: 13 * acc.fontScale,
                                 color: isHighContrast ? Colors.white70 : Colors.grey[600],
                               ),
                             ),
@@ -164,15 +166,16 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                             Container(
                               padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
                               decoration: BoxDecoration(
-                                color: isHighContrast ? Colors.white24 : Theme.of(context).colorScheme.primary.withOpacity(0.1),
+                                color: isHighContrast ? Colors.yellowAccent.withValues(alpha: 0.15) : Theme.of(context).colorScheme.primary.withValues(alpha: 0.1),
                                 borderRadius: BorderRadius.circular(8),
+                                border: isHighContrast ? Border.all(color: Colors.yellowAccent) : null,
                               ),
                               child: Text(
-                                '👁 ผู้ช่วยผู้พิการทางสายตา',
+                                '👁 โหมดผู้พิการทางสายตา (TAM AI)',
                                 style: TextStyle(
-                                  fontSize: 12 * acc.fontScale,
+                                  fontSize: 11.5 * acc.fontScale,
                                   fontWeight: FontWeight.bold,
-                                  color: isHighContrast ? Colors.white : Theme.of(context).colorScheme.primary,
+                                  color: isHighContrast ? Colors.yellowAccent : Theme.of(context).colorScheme.primary,
                                 ),
                               ),
                             ),
@@ -184,102 +187,200 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                 ),
               ),
             ),
-            const SizedBox(height: 16.0),
+            const SizedBox(height: 14.0),
 
-            // Profile preferences card
+            // 2. ═══ Voice & Haptic Accessibility Settings (TAM AI Core Settings) ═══
             Card(
               color: isHighContrast ? Colors.black : Colors.white,
-              shape: isHighContrast ? const RoundedRectangleBorder(side: BorderSide(color: Colors.white)) : null,
+              shape: isHighContrast ? const RoundedRectangleBorder(side: BorderSide(color: Colors.white, width: 2)) : null,
               child: Padding(
                 padding: const EdgeInsets.all(16.0),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(
-                      'ภาษา (Language)',
-                      style: TextStyle(fontSize: 16 * acc.fontScale, fontWeight: FontWeight.bold, color: isHighContrast ? Colors.white : Colors.black87),
-                    ),
-                    const SizedBox(height: 8.0),
-                    DropdownButtonFormField<String>(
-                      value: _selectedLanguage,
-                      decoration: const InputDecoration(
-                        border: OutlineInputBorder(),
-                        contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                      ),
-                      dropdownColor: isHighContrast ? Colors.black : Colors.white,
-                      style: TextStyle(color: isHighContrast ? Colors.white : Colors.black, fontSize: 16 * acc.fontScale),
-                      items: const [
-                        DropdownMenuItem(value: 'th', child: Text('ภาษาไทย')),
-                        DropdownMenuItem(value: 'en', child: Text('English')),
+                    Row(
+                      children: [
+                        Icon(Icons.record_voice_over_rounded, color: isHighContrast ? Colors.yellowAccent : Theme.of(context).colorScheme.primary),
+                        const SizedBox(width: 8),
+                        Text(
+                          'การตั้งค่าระบบเสียงและการสั่น (Voice & Haptic)',
+                          style: TextStyle(fontSize: 16.5 * acc.fontScale, fontWeight: FontWeight.bold, color: isHighContrast ? Colors.yellowAccent : Colors.black87),
+                        ),
                       ],
-                      onChanged: (val) {
-                        if (val != null) {
-                          setState(() {
-                            _selectedLanguage = val;
-                          });
-                        }
-                      },
+                    ),
+                    const SizedBox(height: 14),
+
+                    // Voice Master Switch
+                    SwitchListTile(
+                      contentPadding: EdgeInsets.zero,
+                      title: Text('เปิดระบบเสียงนำทาง (Voice Guidance)', style: TextStyle(fontSize: 15 * acc.fontScale, fontWeight: FontWeight.bold, color: isHighContrast ? Colors.white : Colors.black87)),
+                      subtitle: Text('พูดคำแนะนำการเลี้ยว และเตือนสิ่งกีดขวางล่วงหน้า', style: TextStyle(fontSize: 12 * acc.fontScale, color: isHighContrast ? Colors.white70 : Colors.black54)),
+                      value: acc.voiceEnabled,
+                      onChanged: notifier.toggleVoice,
+                      activeThumbColor: isHighContrast ? Colors.yellowAccent : Theme.of(context).colorScheme.primary,
+                    ),
+                    const Divider(height: 16),
+
+                    // Speech Rate Slider
+                    Text(
+                      'ความเร็วเสียงพูด: ${acc.speechRate.toStringAsFixed(1)}x',
+                      style: TextStyle(fontSize: 14.5 * acc.fontScale, fontWeight: FontWeight.bold, color: isHighContrast ? Colors.white : Colors.black87),
+                    ),
+                    Slider(
+                      min: 0.8,
+                      max: 1.5,
+                      divisions: 7,
+                      value: acc.speechRate,
+                      activeColor: isHighContrast ? Colors.yellowAccent : Theme.of(context).colorScheme.primary,
+                      onChanged: notifier.setSpeechRate,
+                    ),
+                    const SizedBox(height: 8),
+
+                    // Alert Detail Level
+                    Text(
+                      'ระดับความละเอียดการแจ้งเตือน:',
+                      style: TextStyle(fontSize: 14 * acc.fontScale, fontWeight: FontWeight.bold, color: isHighContrast ? Colors.white : Colors.black87),
+                    ),
+                    const SizedBox(height: 6),
+                    SizedBox(
+                      width: double.infinity,
+                      child: SegmentedButton<String>(
+                        showSelectedIcon: false,
+                        segments: const [
+                          ButtonSegment(value: 'brief', label: Text('สั้นกระชับ (แนะนำ)')),
+                          ButtonSegment(value: 'detailed', label: Text('ละเอียดรอบตัว')),
+                        ],
+                        selected: {acc.alertDetailLevel},
+                        onSelectionChanged: (set) => notifier.setAlertDetailLevel(set.first),
+                      ),
+                    ),
+                    const Divider(height: 24),
+
+                    // Auto-open Camera on High Risk Switch
+                    SwitchListTile(
+                      contentPadding: EdgeInsets.zero,
+                      title: Text('เปิดกล้องตรวจจับอัตโนมัติตอน High Risk', style: TextStyle(fontSize: 15 * acc.fontScale, fontWeight: FontWeight.bold, color: isHighContrast ? Colors.white : Colors.black87)),
+                      subtitle: Text('เปิดกล้อง AI สแกนเฉพาะหน้าเมื่อเข้าใกล้จุดเสี่ยงหรือสิ่งกีดขวาง', style: TextStyle(fontSize: 12 * acc.fontScale, color: isHighContrast ? Colors.white70 : Colors.black54)),
+                      value: acc.autoCameraOnHighRisk,
+                      onChanged: notifier.toggleAutoCamera,
+                      activeThumbColor: isHighContrast ? Colors.yellowAccent : Theme.of(context).colorScheme.primary,
+                    ),
+                    const Divider(height: 20),
+
+                    // Early Alert Distance
+                    Text(
+                      'ระยะเตือนล่วงหน้า (Early Alert Distance):',
+                      style: TextStyle(fontSize: 14 * acc.fontScale, fontWeight: FontWeight.bold, color: isHighContrast ? Colors.white : Colors.black87),
+                    ),
+                    const SizedBox(height: 6),
+                    SizedBox(
+                      width: double.infinity,
+                      child: SegmentedButton<int>(
+                        showSelectedIcon: false,
+                        segments: const [
+                          ButtonSegment(value: 15, label: Text('15 เมตร')),
+                          ButtonSegment(value: 25, label: Text('25 ม. (ปกติ)')),
+                          ButtonSegment(value: 35, label: Text('35 เมตร')),
+                        ],
+                        selected: {acc.earlyAlertDistanceMeters},
+                        onSelectionChanged: (set) => notifier.setEarlyAlertDistance(set.first),
+                      ),
+                    ),
+                    const Divider(height: 24),
+
+                    // Haptic Master Switch
+                    SwitchListTile(
+                      contentPadding: EdgeInsets.zero,
+                      title: Text('เปิดการสั่นตอบสนอง (Haptic Feedback)', style: TextStyle(fontSize: 15 * acc.fontScale, fontWeight: FontWeight.bold, color: isHighContrast ? Colors.white : Colors.black87)),
+                      subtitle: Text('สั่นเตือนจังหวะเลี้ยว จุดเสี่ยง และขอความช่วยเหลือ', style: TextStyle(fontSize: 12 * acc.fontScale, color: isHighContrast ? Colors.white70 : Colors.black54)),
+                      value: acc.hapticEnabled,
+                      onChanged: notifier.toggleHaptic,
+                      activeThumbColor: isHighContrast ? Colors.yellowAccent : Theme.of(context).colorScheme.primary,
+                    ),
+                    const SizedBox(height: 6),
+
+                    // Haptic Intensity Level
+                    Text(
+                      'ระดับความแรงการสั่น:',
+                      style: TextStyle(fontSize: 14 * acc.fontScale, fontWeight: FontWeight.bold, color: isHighContrast ? Colors.white : Colors.black87),
+                    ),
+                    const SizedBox(height: 6),
+                    SizedBox(
+                      width: double.infinity,
+                      child: SegmentedButton<String>(
+                        showSelectedIcon: false,
+                        segments: const [
+                          ButtonSegment(value: 'off', label: Text('ปิด')),
+                          ButtonSegment(value: 'light', label: Text('เบา')),
+                          ButtonSegment(value: 'medium', label: Text('กลาง')),
+                          ButtonSegment(value: 'strong', label: Text('แรง')),
+                        ],
+                        selected: {acc.hapticIntensity},
+                        onSelectionChanged: (set) => notifier.setHapticIntensity(set.first),
+                      ),
+                    ),
+                    const Divider(height: 20),
+
+                    // Vibration-Only Mode Switch
+                    SwitchListTile(
+                      contentPadding: EdgeInsets.zero,
+                      title: Text('โหมดสั่นอย่างเดียว (Vibration Only / Silent)', style: TextStyle(fontSize: 15 * acc.fontScale, fontWeight: FontWeight.bold, color: isHighContrast ? Colors.white : Colors.black87)),
+                      subtitle: Text('ปิดเสียงนำทางและใช้ระบบสั่น Haptic Feedback เป็นหลัก', style: TextStyle(fontSize: 12 * acc.fontScale, color: isHighContrast ? Colors.white70 : Colors.black54)),
+                      value: acc.vibrationOnlyMode,
+                      onChanged: notifier.toggleVibrationOnlyMode,
+                      activeThumbColor: isHighContrast ? Colors.yellowAccent : Theme.of(context).colorScheme.primary,
                     ),
                   ],
                 ),
               ),
             ),
-            const SizedBox(height: 16.0),
+            const SizedBox(height: 14.0),
 
-            // System settings triggers card
+            // 3. Display & Theme Settings
             Card(
               color: isHighContrast ? Colors.black : Colors.white,
-              shape: isHighContrast ? const RoundedRectangleBorder(side: BorderSide(color: Colors.white)) : null,
-              child: Column(
-                children: [
-                  SwitchListTile(
-                    title: Text('เปิดระบบคำแนะนำด้วยเสียง (Voice)', style: TextStyle(fontSize: 16 * acc.fontScale, color: isHighContrast ? Colors.white : Colors.black)),
-                    value: acc.voiceEnabled,
-                    onChanged: notifier.toggleVoice,
-                    activeColor: isHighContrast ? Colors.white : Theme.of(context).colorScheme.primary,
-                  ),
-                  SwitchListTile(
-                    title: Text('เปิดการสั่นตอบสนอง (Haptic)', style: TextStyle(fontSize: 16 * acc.fontScale, color: isHighContrast ? Colors.white : Colors.black)),
-                    value: acc.hapticEnabled,
-                    onChanged: notifier.toggleHaptic,
-                    activeColor: isHighContrast ? Colors.white : Theme.of(context).colorScheme.primary,
-                  ),
-                  SwitchListTile(
-                    title: Text('โหมดสีคอนทราสต์สูง (High Contrast)', style: TextStyle(fontSize: 16 * acc.fontScale, color: isHighContrast ? Colors.white : Colors.black)),
-                    value: acc.highContrast,
-                    onChanged: notifier.toggleHighContrast,
-                    activeColor: isHighContrast ? Colors.white : Theme.of(context).colorScheme.primary,
-                  ),
-                  SwitchListTile(
-                    title: Text('โหมดสีสำหรับคนตาบอดสี (Color Blind Mode)', style: TextStyle(fontSize: 16 * acc.fontScale, color: isHighContrast ? Colors.white : Colors.black)),
-                    value: acc.colorBlind,
-                    onChanged: notifier.toggleColorBlind,
-                    activeColor: isHighContrast ? Colors.white : Theme.of(context).colorScheme.primary,
-                  ),
-                ],
-              ),
-            ),
-            const SizedBox(height: 16.0),
-
-            // Font scale slider card
-            Card(
-              color: isHighContrast ? Colors.black : Colors.white,
-              shape: isHighContrast ? const RoundedRectangleBorder(side: BorderSide(color: Colors.white)) : null,
+              shape: isHighContrast ? const RoundedRectangleBorder(side: BorderSide(color: Colors.white, width: 2)) : null,
               child: Padding(
                 padding: const EdgeInsets.all(16.0),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
+                    Row(
+                      children: [
+                        Icon(Icons.display_settings_rounded, color: isHighContrast ? Colors.yellowAccent : Theme.of(context).colorScheme.primary),
+                        const SizedBox(width: 8),
+                        Text(
+                          'การแสดงผลและสี (Display & Colors)',
+                          style: TextStyle(fontSize: 16.5 * acc.fontScale, fontWeight: FontWeight.bold, color: isHighContrast ? Colors.yellowAccent : Colors.black87),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 10),
+                    SwitchListTile(
+                      contentPadding: EdgeInsets.zero,
+                      title: Text('โหมดสีคอนทราสต์สูง (High Contrast)', style: TextStyle(fontSize: 15 * acc.fontScale, color: isHighContrast ? Colors.white : Colors.black87)),
+                      value: acc.highContrast,
+                      onChanged: notifier.toggleHighContrast,
+                      activeThumbColor: isHighContrast ? Colors.yellowAccent : Theme.of(context).colorScheme.primary,
+                    ),
+                    SwitchListTile(
+                      contentPadding: EdgeInsets.zero,
+                      title: Text('โหมดสีสำหรับคนตาบอดสี (Color Blind Mode)', style: TextStyle(fontSize: 15 * acc.fontScale, color: isHighContrast ? Colors.white : Colors.black87)),
+                      value: acc.colorBlind,
+                      onChanged: notifier.toggleColorBlind,
+                      activeThumbColor: isHighContrast ? Colors.yellowAccent : Theme.of(context).colorScheme.primary,
+                    ),
+                    const SizedBox(height: 10),
                     Text(
                       'ขนาดตัวอักษร: ${acc.fontScale.toStringAsFixed(1)}x',
-                      style: TextStyle(fontSize: 16 * acc.fontScale, fontWeight: FontWeight.bold, color: isHighContrast ? Colors.white : Colors.black87),
+                      style: TextStyle(fontSize: 14.5 * acc.fontScale, fontWeight: FontWeight.bold, color: isHighContrast ? Colors.white : Colors.black87),
                     ),
                     Slider(
                       min: 1.0,
                       max: 2.0,
                       divisions: 5,
                       value: acc.fontScale,
-                      activeColor: isHighContrast ? Colors.white : AppColors.getPrimary(acc.colorBlind),
+                      activeColor: isHighContrast ? Colors.yellowAccent : AppColors.getPrimary(acc.colorBlind),
                       inactiveColor: Colors.grey,
                       onChanged: notifier.setFontScale,
                       semanticFormatterCallback: (double value) => 'ขนาดตัวอักษร ${value.toStringAsFixed(1)} เท่า',
@@ -288,90 +389,92 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                 ),
               ),
             ),
-            const Divider(height: 32.0),
+            const SizedBox(height: 14.0),
 
-            // Emergency Contacts list
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                Text(
-                  'รายชื่อผู้ติดต่อฉุกเฉิน',
-                  style: TextStyle(fontSize: 18 * acc.fontScale, fontWeight: FontWeight.bold, color: isHighContrast ? Colors.white : Colors.black87),
-                ),
-                IconButton(
-                  icon: Icon(Icons.person_add, color: isHighContrast ? Colors.white : AppColors.getPrimary(acc.colorBlind)),
-                  onPressed: _addContact,
-                  tooltip: 'เพิ่มผู้ติดต่อฉุกเฉิน',
-                ),
-              ],
-            ),
-            const SizedBox(height: 8.0),
-            
-            if (_contacts.isEmpty)
-              Padding(
-                padding: const EdgeInsets.symmetric(vertical: 16.0),
-                child: Text(
-                  'ไม่มีรายชื่อผู้ติดต่อ',
-                  style: TextStyle(
-                    fontSize: 16 * acc.fontScale,
-                    color: isHighContrast ? Colors.white70 : Colors.grey[600],
-                  ),
-                ),
-              )
-            else
-              ListView.builder(
-                shrinkWrap: true,
-                physics: const NeverScrollableScrollPhysics(),
-                itemCount: _contacts.length,
-                itemBuilder: (context, index) {
-                  final contact = _contacts[index];
-                  return Dismissible(
-                    key: ValueKey(contact['phone']! + index.toString()),
-                    direction: DismissDirection.endToStart,
-                    onDismissed: (direction) {
-                      _deleteContact(index);
-                    },
-                    background: Container(
-                      color: Colors.red,
-                      alignment: Alignment.centerRight,
-                      padding: const EdgeInsets.only(right: 20.0),
-                      child: const Icon(Icons.delete, color: Colors.white),
-                    ),
-                    child: Card(
-                      color: isHighContrast ? Colors.black : Colors.white,
-                      shape: isHighContrast ? const RoundedRectangleBorder(side: BorderSide(color: Colors.white)) : null,
-                      margin: const EdgeInsets.only(bottom: 8.0),
-                      child: ListTile(
-                        leading: CircleAvatar(
-                          backgroundColor: isHighContrast ? Colors.white : AppColors.primarySurface,
-                          child: Icon(Icons.person, color: isHighContrast ? Colors.black : AppColors.getPrimary(acc.colorBlind)),
-                        ),
-                        title: Text(contact['name']!, style: TextStyle(fontSize: 16 * acc.fontScale, color: isHighContrast ? Colors.white : Colors.black)),
-                        subtitle: Text(contact['phone']!, style: TextStyle(fontSize: 14 * acc.fontScale, color: isHighContrast ? Colors.white70 : Colors.black54)),
-                        trailing: Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            IconButton(
-                              icon: const Icon(Icons.phone, color: Colors.green),
-                              onPressed: () => _makePhoneCall(contact['phone']!),
-                              tooltip: 'โทรหา ${contact['name']}',
-                            ),
-                            IconButton(
-                              icon: Icon(Icons.delete_outline, color: Colors.red[300]),
-                              onPressed: () => _deleteContact(index),
-                              tooltip: 'ลบผู้ติดต่อ',
-                            ),
-                          ],
-                        ),
-                      ),
-                    ),
-                  );
-                },
-              ),
-              
-            // City Accessibility Command Dashboard Link Card (For City Planners & Admins)
+            // 4. Emergency Contacts list
             Card(
-              color: isHighContrast ? Colors.black : const Color(0xFF1E1B4B), // Deep Indigo
+              color: isHighContrast ? Colors.black : Colors.white,
+              shape: isHighContrast ? const RoundedRectangleBorder(side: BorderSide(color: Colors.white, width: 2)) : null,
+              child: Padding(
+                padding: const EdgeInsets.all(16.0),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Text(
+                          'รายชื่อผู้ติดต่อฉุกเฉิน',
+                          style: TextStyle(fontSize: 17 * acc.fontScale, fontWeight: FontWeight.bold, color: isHighContrast ? Colors.yellowAccent : Colors.black87),
+                        ),
+                        IconButton(
+                          icon: Icon(Icons.person_add, color: isHighContrast ? Colors.yellowAccent : AppColors.getPrimary(acc.colorBlind)),
+                          onPressed: _addContact,
+                          tooltip: 'เพิ่มผู้ติดต่อฉุกเฉิน',
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 8.0),
+                    if (_contacts.isEmpty)
+                      Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 12.0),
+                        child: Text(
+                          'ไม่มีรายชื่อผู้ติดต่อ',
+                          style: TextStyle(
+                            fontSize: 15 * acc.fontScale,
+                            color: isHighContrast ? Colors.white70 : Colors.grey[600],
+                          ),
+                        ),
+                      )
+                    else
+                      ListView.builder(
+                        shrinkWrap: true,
+                        physics: const NeverScrollableScrollPhysics(),
+                        itemCount: _contacts.length,
+                        itemBuilder: (context, index) {
+                          final contact = _contacts[index];
+                          return Card(
+                            color: isHighContrast ? const Color(0xFF1E293B) : const Color(0xFFF8FAFC),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(12),
+                              side: BorderSide(color: isHighContrast ? Colors.white30 : const Color(0xFFE2E8F0)),
+                            ),
+                            margin: const EdgeInsets.only(bottom: 8.0),
+                            child: ListTile(
+                              leading: CircleAvatar(
+                                backgroundColor: isHighContrast ? Colors.yellowAccent : AppColors.getPrimary(acc.colorBlind),
+                                child: Icon(Icons.person, color: isHighContrast ? Colors.black : Colors.white),
+                              ),
+                              title: Text(contact['name']!, style: TextStyle(fontSize: 15 * acc.fontScale, fontWeight: FontWeight.bold, color: isHighContrast ? Colors.white : Colors.black)),
+                              subtitle: Text(contact['phone']!, style: TextStyle(fontSize: 13 * acc.fontScale, color: isHighContrast ? Colors.white70 : Colors.black54)),
+                              trailing: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  IconButton(
+                                    icon: const Icon(Icons.phone, color: Colors.green),
+                                    onPressed: () => _makePhoneCall(contact['phone']!),
+                                    tooltip: 'โทรหา ${contact['name']}',
+                                  ),
+                                  IconButton(
+                                    icon: Icon(Icons.delete_outline, color: Colors.red[300]),
+                                    onPressed: () => _deleteContact(index),
+                                    tooltip: 'ลบผู้ติดต่อ',
+                                  ),
+                                ],
+                              ),
+                            ),
+                          );
+                        },
+                      ),
+                  ],
+                ),
+              ),
+            ),
+            const SizedBox(height: 14.0),
+
+            // 5. City Accessibility Command Dashboard Link Card
+            Card(
+              color: isHighContrast ? Colors.black : const Color(0xFF1E1B4B),
               shape: RoundedRectangleBorder(
                 borderRadius: BorderRadius.circular(14),
                 side: BorderSide(color: isHighContrast ? Colors.white : const Color(0xFF6366F1), width: 1.5),
@@ -380,7 +483,7 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                 leading: Container(
                   padding: const EdgeInsets.all(8),
                   decoration: BoxDecoration(
-                    color: Colors.indigo.withOpacity(0.3),
+                    color: Colors.indigo.withValues(alpha: 0.3),
                     borderRadius: BorderRadius.circular(10),
                   ),
                   child: const Icon(Icons.analytics_rounded, color: Colors.amberAccent, size: 28),
@@ -406,9 +509,9 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                 },
               ),
             ),
-            const SizedBox(height: 24.0),
+            const SizedBox(height: 20.0),
 
-            // Logout Button
+            // 6. Logout Button
             Semantics(
               button: true,
               label: 'ปุ่มออกจากระบบ',
@@ -420,24 +523,24 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                 icon: const Icon(Icons.logout),
                 label: Text(
                   'ออกจากระบบ',
-                  style: TextStyle(fontSize: 18 * acc.fontScale, fontWeight: FontWeight.bold),
+                  style: TextStyle(fontSize: 17 * acc.fontScale, fontWeight: FontWeight.bold),
                 ),
                 style: ElevatedButton.styleFrom(
-                  backgroundColor: isHighContrast ? Colors.black : Colors.red[800],
+                  backgroundColor: const Color(0xFFDC2626),
                   foregroundColor: Colors.white,
-                  side: isHighContrast ? const BorderSide(color: Colors.white, width: 2) : null,
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
                   padding: const EdgeInsets.symmetric(vertical: 16.0),
                 ),
               ),
             ),
-            
-            const SizedBox(height: 24.0),
+            const SizedBox(height: 20.0),
+
             // App Version
             Center(
               child: Text(
-                'เวอร์ชันแอปพลิเคชัน 1.0.0',
+                'TAM AI Version 1.0.0',
                 style: TextStyle(
-                  fontSize: 14 * acc.fontScale,
+                  fontSize: 13 * acc.fontScale,
                   color: isHighContrast ? Colors.white54 : Colors.grey,
                 ),
               ),

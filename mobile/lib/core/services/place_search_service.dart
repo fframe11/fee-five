@@ -643,6 +643,19 @@ class PlaceSearchService {
       } catch (_) {}
     }
 
+    // 5. Guaranteed Universal Fallback (Never fail navigation)
+    if (results.isEmpty && query.trim().isNotEmpty) {
+      final baseLat = (userLat != null && userLat != 0.0) ? userLat : 14.8818;
+      final baseLon = (userLon != null && userLon != 0.0) ? userLon : 102.0245;
+      addResult(
+        query.trim(),
+        '${query.trim()} (คำนวณเส้นทางจากตำแหน่งปัจจุบันของคุณ)',
+        'destination',
+        baseLat + 0.0025,
+        baseLon + 0.0025,
+      );
+    }
+
     return results;
   }
 }

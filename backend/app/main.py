@@ -55,6 +55,28 @@ app.add_middleware(
 app.include_router(agent_router)
 app.include_router(gtfs_router)
 
+@app.get("/download-apk")
+@app.get("/app-debug.apk")
+def download_apk():
+    apk_paths = [
+        "c:/AccessGuardian AI/fee-five/mobile/build/app/outputs/flutter-apk/app-arm64-v8a-release.apk",
+        "c:/AccessGuardian AI/fee-five/mobile/build/app/outputs/flutter-apk/app-release.apk",
+        "c:/AccessGuardian AI/fee-five/mobile/build/app/outputs/flutter-apk/app-debug.apk",
+    ]
+    for p in apk_paths:
+        if os.path.exists(p):
+            return FileResponse(
+                path=p,
+                media_type="application/vnd.android.package-archive",
+                filename="tam-ai.apk",
+                headers={
+                    "Content-Disposition": 'attachment; filename="tam-ai.apk"',
+                    "Accept-Ranges": "bytes",
+                    "Cache-Control": "no-cache",
+                }
+            )
+    raise HTTPException(status_code=404, detail="APK not found")
+
 # OAuth2 setup
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/v1/auth/login")
 

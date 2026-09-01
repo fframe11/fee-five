@@ -9,6 +9,10 @@ class ApiClient {
 
   static String getDefaultBaseUrl() {
     if (kIsWeb) {
+      final host = Uri.base.host;
+      if (host.isNotEmpty && host != 'localhost' && host != '127.0.0.1') {
+        return 'http://$host:8000';
+      }
       return 'http://127.0.0.1:8000';
     }
     // Allow overriding via flutter build --dart-define=BACKEND_URL=...
@@ -16,7 +20,7 @@ class ApiClient {
     if (envUrl.isNotEmpty) return envUrl;
 
     // Default to computer LAN IP so mobile device on same WiFi connects seamlessly
-    return 'http://10.1.236.181:8000';
+    return 'http://10.0.183.244:8000';
   }
 
   ApiClient({String? baseUrl}) : baseUrl = baseUrl ?? getDefaultBaseUrl();

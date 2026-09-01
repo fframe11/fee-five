@@ -4,6 +4,7 @@ import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:camera/camera.dart';
 import 'package:tflite_flutter/tflite_flutter.dart';
+import 'package:image/image.dart' as img;
 
 /// Native mobile implementation of TfliteService using on-device tflite_flutter interpreter.
 /// Fully compatible with YOLO11/YOLOv8 tensor architecture ([1, 12, 8400] output tensor).
@@ -30,26 +31,38 @@ class TfliteService {
 
     try {
       // 1. Try loading primary YOLO11 custom model
-      _interpreter = await Interpreter.fromAsset('models/best.tflite');
+      try {
+        _interpreter = await Interpreter.fromAsset('assets/models/best.tflite');
+      } catch (_) {
+        _interpreter = await Interpreter.fromAsset('models/best.tflite');
+      }
       _isModelLoaded = true;
       if (kDebugMode) {
-        debugPrint('[YOLO11 Native] Loaded models/best.tflite successfully.');
+        debugPrint('[YOLO11 Native] Loaded best.tflite successfully.');
       }
     } catch (e) {
       try {
         // 2. Fallback to access_guardian_yolo.tflite
-        _interpreter = await Interpreter.fromAsset('models/access_guardian_yolo.tflite');
+        try {
+          _interpreter = await Interpreter.fromAsset('assets/models/access_guardian_yolo.tflite');
+        } catch (_) {
+          _interpreter = await Interpreter.fromAsset('models/access_guardian_yolo.tflite');
+        }
         _isModelLoaded = true;
         if (kDebugMode) {
-          debugPrint('[YOLO11 Native] Fallback to models/access_guardian_yolo.tflite.');
+          debugPrint('[YOLO11 Native] Fallback to access_guardian_yolo.tflite.');
         }
       } catch (e2) {
         try {
           // 3. Fallback to ssd_mobilenet.tflite
-          _interpreter = await Interpreter.fromAsset('models/ssd_mobilenet.tflite');
+          try {
+            _interpreter = await Interpreter.fromAsset('assets/models/ssd_mobilenet.tflite');
+          } catch (_) {
+            _interpreter = await Interpreter.fromAsset('models/ssd_mobilenet.tflite');
+          }
           _isModelLoaded = true;
           if (kDebugMode) {
-            debugPrint('[YOLO11 Native] Fallback to models/ssd_mobilenet.tflite.');
+            debugPrint('[YOLO11 Native] Fallback to ssd_mobilenet.tflite.');
           }
         } catch (e3) {
           if (kDebugMode) {
@@ -111,53 +124,92 @@ class TfliteService {
     if (_interpreter == null) return [];
 
     try {
-      // YOLO11 output shape: [1, 12, 8400]
-      // 12 rows = [cx, cy, w, h, class0_score, class1_score, ..., class7_score]
-      // 8400 columns = anchor prediction candidates
-      final output = List.generate(
-        1,
-        (_) => List.generate(12, (_) => List<double>.filled(8400, 0.0)),
-      );
-
-      _interpreter!.run(inputTensor, output);
-
+      final outShape = _interpreter!.getOutputTensor(0).shape;
       final List<Map<String, dynamic>> candidates = [];
-      const double confThreshold = 0.25;
+      const double confThreshold = 0.18; // Low threshold for high-sensitivity detection
 
-      for (int i = 0; i < 8400; i++) {
-        // Find maximum class confidence among 8 accessibility classes
-        double maxScore = 0.0;
-        int bestClassId = -1;
+      if (outShape.length == 3 && outShape[1] == 12 && outShape[2] == 8400) {
+        final output = List.generate(
+          1,
+          (_) => List.generate(12, (_) => List<double>.filled(8400, 0.0)),
+        );
 
-        for (int c = 0; c < 8; c++) {
-          final score = output[0][4 + c][i];
-          if (score > maxScore) {
-            maxScore = score;
-            bestClassId = c;
+        _interpreter!.run(inputTensor, output);
+
+        for (int i = 0; i < 8400; i++) {
+          double maxScore = 0.0;
+          int bestClassId = -1;
+
+          for (int c = 0; c < 8; c++) {
+            final score = output[0][4 + c][i];
+            if (score > maxScore) {
+              maxScore = score;
+              bestClassId = c;
+            }
           }
+
+          if (maxScore < confThreshold || bestClassId == -1) continue;
+
+          final double cx = output[0][0][i];
+          final double cy = output[0][1][i];
+          final double w = output[0][2][i];
+          final double h = output[0][3][i];
+
+          final double xmin = ((cx - w / 2.0) / 640.0).clamp(0.0, 1.0);
+          final double ymin = ((cy - h / 2.0) / 640.0).clamp(0.0, 1.0);
+          final double normW = (w / 640.0).clamp(0.0, 1.0);
+          final double normH = (h / 640.0).clamp(0.0, 1.0);
+
+          candidates.add({
+            'class': accessibilityLabels[bestClassId] ?? 'obstacle',
+            'score': maxScore,
+            'x': xmin,
+            'y': ymin,
+            'w': normW,
+            'h': normH,
+          });
         }
+      } else if (outShape.length == 3 && outShape[1] == 8400 && outShape[2] == 12) {
+        final output = List.generate(
+          1,
+          (_) => List.generate(8400, (_) => List<double>.filled(12, 0.0)),
+        );
 
-        if (maxScore < confThreshold || bestClassId == -1) continue;
+        _interpreter!.run(inputTensor, output);
 
-        // YOLO coordinates are centered [cx, cy, w, h] in 640x640 space
-        final double cx = output[0][0][i];
-        final double cy = output[0][1][i];
-        final double w = output[0][2][i];
-        final double h = output[0][3][i];
+        for (int i = 0; i < 8400; i++) {
+          double maxScore = 0.0;
+          int bestClassId = -1;
 
-        final double xmin = ((cx - w / 2.0) / 640.0).clamp(0.0, 1.0);
-        final double ymin = ((cy - h / 2.0) / 640.0).clamp(0.0, 1.0);
-        final double normW = (w / 640.0).clamp(0.0, 1.0);
-        final double normH = (h / 640.0).clamp(0.0, 1.0);
+          for (int c = 0; c < 8; c++) {
+            final score = output[0][i][4 + c];
+            if (score > maxScore) {
+              maxScore = score;
+              bestClassId = c;
+            }
+          }
 
-        candidates.add({
-          'class': accessibilityLabels[bestClassId] ?? 'obstacle',
-          'score': maxScore,
-          'x': xmin,
-          'y': ymin,
-          'w': normW,
-          'h': normH,
-        });
+          if (maxScore < confThreshold || bestClassId == -1) continue;
+
+          final double cx = output[0][i][0];
+          final double cy = output[0][i][1];
+          final double w = output[0][i][2];
+          final double h = output[0][i][3];
+
+          final double xmin = ((cx - w / 2.0) / 640.0).clamp(0.0, 1.0);
+          final double ymin = ((cy - h / 2.0) / 640.0).clamp(0.0, 1.0);
+          final double normW = (w / 640.0).clamp(0.0, 1.0);
+          final double normH = (h / 640.0).clamp(0.0, 1.0);
+
+          candidates.add({
+            'class': accessibilityLabels[bestClassId] ?? 'obstacle',
+            'score': maxScore,
+            'x': xmin,
+            'y': ymin,
+            'w': normW,
+            'h': normH,
+          });
+        }
       }
 
       // Sort by confidence descending
@@ -204,32 +256,61 @@ class TfliteService {
 
   /// Preprocess CameraImage frame to normalized float32 tensor [1, 640, 640, 3]
   List<List<List<List<double>>>> _preprocessCameraImage(CameraImage image, int targetW, int targetH) {
-    final tensor = List.generate(
-      1,
-      (_) => List.generate(
-        targetH,
-        (y) => List.generate(
-          targetW,
-          (x) => List<double>.filled(3, 0.5),
-        ),
-      ),
-    );
-    return tensor;
+    try {
+      if (image.format.group == ImageFormatGroup.jpeg) {
+        return _preprocessRawBytes(image.planes[0].bytes, targetW, targetH);
+      }
+      return _createDefaultTensor(targetW, targetH);
+    } catch (e) {
+      if (kDebugMode) debugPrint('[YOLO11 Preprocess] CameraImage error: $e');
+      return _createDefaultTensor(targetW, targetH);
+    }
   }
 
-  /// Preprocess Raw Bytes to normalized float32 tensor [1, 640, 640, 3]
+  /// Preprocess Raw Bytes to real decoded normalized RGB float32 tensor [1, 640, 640, 3]
   List<List<List<List<double>>>> _preprocessRawBytes(Uint8List bytes, int targetW, int targetH) {
-    final tensor = List.generate(
+    try {
+      final decoded = img.decodeImage(bytes);
+      if (decoded == null) {
+        return _createDefaultTensor(targetW, targetH);
+      }
+      final resized = img.copyResize(decoded, width: targetW, height: targetH);
+
+      final tensor = List.generate(
+        1,
+        (_) => List.generate(
+          targetH,
+          (y) => List.generate(
+            targetW,
+            (x) {
+              final pixel = resized.getPixel(x, y);
+              return [
+                pixel.r / 255.0,
+                pixel.g / 255.0,
+                pixel.b / 255.0,
+              ];
+            },
+          ),
+        ),
+      );
+      return tensor;
+    } catch (e) {
+      if (kDebugMode) debugPrint('[YOLO11 Preprocess] decode error: $e');
+      return _createDefaultTensor(targetW, targetH);
+    }
+  }
+
+  List<List<List<List<double>>>> _createDefaultTensor(int targetW, int targetH) {
+    return List.generate(
       1,
       (_) => List.generate(
         targetH,
-        (y) => List.generate(
+        (_) => List.generate(
           targetW,
-          (x) => List<double>.filled(3, 0.5),
+          (_) => List<double>.filled(3, 0.5),
         ),
       ),
     );
-    return tensor;
   }
 
   void dispose() {

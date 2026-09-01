@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'package:flutter/foundation.dart';
+import 'haptic_service.dart';
 
 /// ระดับความเสี่ยง (Risk State)
 enum RiskState {
@@ -257,15 +258,22 @@ class RiskEngine {
       _pendingCount = 1;
     }
 
-    if (_pendingCount >= 2 && evaluatedState != _currentState) {
-      final now = DateTime.now();
-      if (now.difference(_lastStateChange).inMilliseconds >= 800) {
+    final now = DateTime.now();
+    if (evaluatedState != _currentState) {
+      if (now.difference(_lastStateChange).inMilliseconds >= 600) {
         _currentState = evaluatedState;
         _lastStateChange = now;
         _pendingCount = 0;
 
+        // Trigger appropriate Haptic Feedback on Risk State Transition
+        if (_currentState == RiskState.highRisk || _currentState == RiskState.critical) {
+          HapticService().enterHighRisk();
+        } else if (_currentState == RiskState.warning) {
+          HapticService().enterRisk();
+        }
+
         if (kDebugMode) {
-          debugPrint('[TAM RiskEngine] State:  | SafetyMargin: m | GPS: +- m () | Camera: ');
+          debugPrint('[TAM RiskEngine] State: $_currentState | SafetyMargin: ${safetyMargin.toStringAsFixed(1)}m | Camera: $cameraTrigger');
         }
       }
     }

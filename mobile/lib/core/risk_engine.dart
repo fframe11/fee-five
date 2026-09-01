@@ -133,6 +133,20 @@ class AccessibilityRiskEngine {
         warning = "มีประตูอยู่ข้างหน้าคุณ ระยะ $distance เมตร";
         break;
 
+      case 'intersection':
+        risk = distance < 3.0 ? RiskLevel.high : RiskLevel.medium;
+        warning = distance < 3.0 
+            ? "อันตรายถึงทางแยกแล้ว ระวังรถซ้ายขวา"
+            : "มีทางแยกอยู่ข้างหน้า ระยะ $distance เมตร";
+        break;
+
+      case 'zebra_crossing':
+        risk = distance < 3.0 ? RiskLevel.high : RiskLevel.medium;
+        warning = distance < 3.0
+            ? "ถึงทางม้าลายแล้ว ข้ามถนนด้วยความระมัดระวัง"
+            : "มีทางม้าลายอยู่ข้างหน้า ระยะ $distance เมตร";
+        break;
+
       default:
         if (distance < 3.0) {
           risk = distance < 1.5 ? RiskLevel.high : RiskLevel.medium;

@@ -7,6 +7,7 @@ import 'package:flutter/semantics.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:camera/camera.dart';
 import 'package:geolocator/geolocator.dart';
+import 'package:permission_handler/permission_handler.dart';
 import '../../core/accessibility_notifier.dart';
 import '../../core/api_client.dart';
 import '../../core/tflite_service.dart';
@@ -14,6 +15,7 @@ import '../../core/tts_helper.dart';
 import '../../core/risk_engine.dart';
 import '../../core/app_colors.dart';
 import '../../core/services/vision_trigger.dart';
+import '../../core/services/haptic_service.dart';
 import 'dart:convert';
 import 'camera_loader.dart';
 
@@ -171,13 +173,41 @@ class _VisionAssistScreenState extends ConsumerState<VisionAssistScreen> with Ti
     }
   }
   
+  List<CameraDescription> _availableCamerasList = [];
+  int _selectedCameraIndex = 0;
+  
   Future<void> _initCamera() async {
     try {
-      final cameras = await availableCameras();
-      final backCamera = cameras.firstWhere(
+      if (!kIsWeb) {
+        final status = await Permission.camera.request();
+        if (status.isDenied || status.isPermanentlyDenied) {
+          if (mounted) {
+            setState(() {
+              _hasCameraPermission = false;
+              _isCameraInitialized = false;
+            });
+            announceSpeech('กรุณาอนุญาตให้แอป TAM เข้าถึงกล้องถ่ายรูปในการตั้งค่า', true);
+          }
+          return;
+        }
+      }
+
+      _availableCamerasList = await availableCameras();
+      if (_availableCamerasList.isEmpty) {
+        if (mounted) {
+          setState(() {
+            _hasCameraPermission = false;
+            _isCameraInitialized = false;
+          });
+        }
+        return;
+      }
+
+      final backCamera = _availableCamerasList.firstWhere(
         (camera) => camera.lensDirection == CameraLensDirection.back,
-        orElse: () => cameras.first,
+        orElse: () => _availableCamerasList.first,
       );
+      _selectedCameraIndex = _availableCamerasList.indexOf(backCamera);
       
       _cameraController = CameraController(
         backCamera,
@@ -193,7 +223,14 @@ class _VisionAssistScreenState extends ConsumerState<VisionAssistScreen> with Ti
 
       if (mounted) {
         setState(() {
+          _hasCameraPermission = true;
           _isCameraInitialized = true;
+        });
+        // Auto-start scanning immediately for visually impaired users
+        Future.delayed(const Duration(milliseconds: 300), () {
+          if (mounted && !_isScanning) {
+            _startScanning();
+          }
         });
       }
     } catch (e) {
@@ -206,6 +243,28 @@ class _VisionAssistScreenState extends ConsumerState<VisionAssistScreen> with Ti
     }
   }
 
+  Future<void> _switchCameraLens() async {
+    if (_availableCamerasList.length < 2) return;
+    HapticService().turnGuidance();
+    _selectedCameraIndex = (_selectedCameraIndex + 1) % _availableCamerasList.length;
+    final newCamera = _availableCamerasList[_selectedCameraIndex];
+    
+    await _cameraController?.dispose();
+    _cameraController = CameraController(
+      newCamera,
+      ResolutionPreset.medium,
+      enableAudio: false,
+      imageFormatGroup: ImageFormatGroup.jpeg,
+    );
+    try {
+      await _cameraController!.initialize();
+      if (mounted) setState(() {});
+      final acc = ref.read(accessibilityProvider);
+      final isBack = newCamera.lensDirection == CameraLensDirection.back;
+      announceSpeech(isBack ? 'สลับเป็นกล้องหลังแล้ว' : 'สลับเป็นกล้องหน้าแล้ว', acc.voiceEnabled);
+    } catch (_) {}
+  }
+
   void _toggleScan() {
     if (_isScanning) {
       _stopScanning();
@@ -214,13 +273,22 @@ class _VisionAssistScreenState extends ConsumerState<VisionAssistScreen> with Ti
     }
   }
 
+  bool _isProcessingStream = false;
+
   void _startScanning() {
     setState(() {
       _isScanning = true;
     });
-    SemanticsService.announce("เริ่มต้นสแกนสิ่งกีดขวางระบบ 2 ชั้น", TextDirection.ltr);
-    HapticFeedback.mediumImpact();
-    _runContinuousScanLoop();
+    final acc = ref.read(accessibilityProvider);
+    announceSpeech("เปิดกล้องตรวจจับแล้ว กำลังสแกนภาพด้านหน้า", acc.voiceEnabled);
+    HapticService().cameraToggle(opening: true);
+
+    if (kIsWeb) {
+      _runContinuousScanLoop();
+    } else {
+      // Use continuous shot loop instead of heavy stream processing on mobile to prevent freezing
+      _runContinuousScanLoop();
+    }
   }
 
   void _stopScanning() {
@@ -230,16 +298,38 @@ class _VisionAssistScreenState extends ConsumerState<VisionAssistScreen> with Ti
       _obstacles = [];
       _simulatedProximity = 0.0;
     });
-    SemanticsService.announce("หยุดสแกน", TextDirection.ltr);
-    HapticFeedback.lightImpact();
+    if (!kIsWeb && _cameraController != null && _cameraController!.value.isStreamingImages) {
+      try {
+        _cameraController!.stopImageStream();
+      } catch (_) {}
+    }
+    final acc = ref.read(accessibilityProvider);
+    announceSpeech("หยุดสแกนกล้องแล้ว", acc.voiceEnabled);
+    HapticService().cameraToggle(opening: false);
+  }
+
+  Future<void> _processCameraStream(CameraImage image) async {
+    if (!mounted || !_isScanning) return;
+    try {
+      final tfliteResults = await _tfliteService.detectOnFrame(image);
+      if (!mounted || !_isScanning) return;
+
+      List<DetectedObstacle> stage1Candidates = [];
+      for (var item in tfliteResults) {
+        stage1Candidates.add(DetectedObstacle.fromJson(item));
+      }
+      
+      _updateObstaclesUI(stage1Candidates);
+    } catch (e) {
+      debugPrint('[Stream processing] error: $e');
+    }
   }
 
   Future<void> _runContinuousScanLoop() async {
     while (mounted && _isScanning) {
       await _executeSingleShotAnalysis();
       if (!mounted || !_isScanning) break;
-      // Wait 3 seconds steadily between frames for maximum accuracy
-      await Future.delayed(const Duration(seconds: 3));
+      await Future.delayed(const Duration(milliseconds: 800));
     }
   }
 
@@ -286,9 +376,11 @@ class _VisionAssistScreenState extends ConsumerState<VisionAssistScreen> with Ti
           debugPrint('[Stage 1 YOLO-World] Edge inference error: $e');
         }
 
+        // Use fast on-device edge detections immediately
+        proofedDetections = List.from(stage1Candidates);
+
         // =====================================================================
-        // 🧠 STAGE 2: Gemini / Vision AI Proofing & Verification Gate
-        // Proofs whether YOLO candidate detections are True or False Positives
+        // 🧠 STAGE 2: Gemini / Vision AI Proofing (Non-blocking enhancement)
         // =====================================================================
         try {
           final candidateSummary = stage1Candidates.map((c) => {
@@ -303,19 +395,20 @@ STAGE 1 RAW YOLO-WORLD CANDIDATE DETECTIONS:
 ${jsonEncode(candidateSummary)}
 
 YOUR TASK (STAGE 2 PROOFING & REFINEMENT):
-1. Proof each Stage 1 candidate detection against the actual image:
-   - If it is a FALSE POSITIVE (e.g. wallpaper pattern, light reflection, harmless shadow, background clutter), DISCARD it with "is_valid": false.
-   - If it is a TRUE physical obstacle or facility (e.g. pillar, column, pole, stairs, pothole, curb, barrier, door, table, chair, glass window, vehicle), CONFIRM it with "is_valid": true, refine its exact bounding box [ymin, xmin, ymax, xmax] (normalized 0 to 1000) and provide a concise Thai proof reason.
-2. Detect any critical physical hazards directly on the walking path that YOLO missed.
+1. **CRITICAL PRIORITY**: Detect if the user is currently at or approaching a "zebra_crossing" (ทางม้าลาย) or an "intersection" (ทางแยก / จุดตัดถนน). The user explicitly requested to focus on these! If present, add them with high confidence.
+2. Proof each Stage 1 candidate detection against the actual image:
+   - If it is a FALSE POSITIVE, DISCARD it with "is_valid": false.
+   - If it is a TRUE physical obstacle, CONFIRM it with "is_valid": true.
 3. Return ONLY a valid JSON array of objects without extra text:
 [
-  {"label": "pillar", "score": 0.95, "is_valid": true, "proof_reason": "ยืนยันเสาคอนกรีตจริงกลางทางเดิน", "bbox_2d": [ymin, xmin, ymax, xmax]}
+  {"label": "zebra_crossing", "score": 0.99, "is_valid": true, "proof_reason": "พบทางม้าลายอยู่ด้านหน้า", "bbox_2d": [0, 0, 1000, 1000]},
+  {"label": "intersection", "score": 0.95, "is_valid": true, "proof_reason": "พบทางแยกด้านหน้า", "bbox_2d": [0, 0, 1000, 1000]}
 ]''';
 
           final description = await ApiClient().analyzeVisionImage(
             base64Img,
             prompt: proofingPrompt,
-          ).timeout(const Duration(seconds: 10));
+          ).timeout(const Duration(milliseconds: 1500));
 
           String jsonStr = description.trim();
           final startIdx = jsonStr.indexOf('[');
@@ -323,19 +416,21 @@ YOUR TASK (STAGE 2 PROOFING & REFINEMENT):
           if (startIdx != -1 && endIdx != -1 && endIdx > startIdx) {
             jsonStr = jsonStr.substring(startIdx, endIdx + 1);
             final List<dynamic> decoded = jsonDecode(jsonStr);
+            final List<DetectedObstacle> cloudVerified = [];
             for (var item in decoded) {
               if (item is Map<String, dynamic>) {
                 final isValid = item['is_valid'] ?? true;
                 if (isValid == true || isValid == 'true') {
-                  proofedDetections.add(DetectedObstacle.fromJson(item));
+                  cloudVerified.add(DetectedObstacle.fromJson(item));
                 }
               }
             }
+            if (cloudVerified.isNotEmpty) {
+              proofedDetections = cloudVerified;
+            }
           }
-        } catch (e) {
-          debugPrint('[Stage 2 Gemini Proofing] Proofing error, fallback to candidate filter: $e');
-          // If offline / network timeout, fallback to filtered Stage 1 edge detections
-          proofedDetections = stage1Candidates.where((c) => c.score >= 0.55).toList();
+        } catch (_) {
+          // Keep on-device stage1Candidates
         }
       }
     } catch (e) {
@@ -345,12 +440,27 @@ YOUR TASK (STAGE 2 PROOFING & REFINEMENT):
     // =========================================================================
     // 🎯 STAGE 3: Verified Output Generation & Accessibility Risk Assessment
     // =========================================================================
+    _updateObstaclesUI(proofedDetections);
+  }
+
+  void _updateObstaclesUI(List<DetectedObstacle> proofedDetections) {
+    if (!mounted || !_isScanning) return;
+    
+    final acc = ref.read(accessibilityProvider);
     const profile = 'visual';
     final List<DetectedObstacle> verifiedObstacles = [];
     double maxProximity = 0.0;
     List<String> warningsList = [];
 
+    // Filter to ONLY prioritize Zebra Crossings, Intersections, and Critical Hazards
+    // as requested by the user ("จับพวกแค่ทางม้าลาย ทางแยก")
+    final List<String> allowedFocus = ['zebra_crossing', 'intersection', 'pothole', 'stairs', 'vehicle', 'car', 'motorcycle'];
+
     for (var obs in proofedDetections) {
+      if (!allowedFocus.contains(obs.label.toLowerCase())) {
+        continue; // Skip minor things like pillars, fans, chairs to reduce noise
+      }
+
       final assessment = AccessibilityRiskEngine.assess(obs, profile);
       verifiedObstacles.add(obs);
 
@@ -365,37 +475,35 @@ YOUR TASK (STAGE 2 PROOFING & REFINEMENT):
       }
     }
 
-    if (mounted && _isScanning) {
-      setState(() {
-        _isAnalyzingShot = false;
-        _obstacles = verifiedObstacles;
-        _simulatedProximity = verifiedObstacles.isNotEmpty ? maxProximity : 0.0;
-      });
+    setState(() {
+      _isAnalyzingShot = false;
+      _obstacles = verifiedObstacles;
+      _simulatedProximity = verifiedObstacles.isNotEmpty ? maxProximity : 0.0;
+    });
 
-      if (warningsList.isNotEmpty) {
-        final warningsText = warningsList.toSet().join(' และ ');
-        announceSpeech(warningsText, acc.voiceEnabled);
-      } else if (verifiedObstacles.isNotEmpty) {
-        final labels = verifiedObstacles.map((o) => _getThaiLabel(o.label)).toSet().join(', ');
-        final distStr = _formatDistanceText(_getEstimatedDistanceMeters(_simulatedProximity));
-        announceSpeech('ตรวจพบ $labels ด้านหน้า ระยะ $distStr', acc.voiceEnabled);
-      }
+    if (warningsList.isNotEmpty) {
+      final warningsText = warningsList.toSet().join(' และ ');
+      announceSpeech(warningsText, acc.voiceEnabled);
+    } else if (verifiedObstacles.isNotEmpty) {
+      final labels = verifiedObstacles.map((o) => _getThaiLabel(o.label)).toSet().join(', ');
+      final distStr = _formatDistanceText(_getEstimatedDistanceMeters(_simulatedProximity));
+      announceSpeech('ตรวจพบ $labels ด้านหน้า ระยะ $distStr', acc.voiceEnabled);
+    }
 
-      if (acc.hapticEnabled && verifiedObstacles.isNotEmpty) {
-        HapticFeedback.lightImpact();
-      }
+    if (verifiedObstacles.isNotEmpty) {
+      HapticService().obstacleDetected();
+    }
 
-      // Auto-save high-hazard obstacles to GIS
-      final highHazards = verifiedObstacles.where((o) {
-        final l = o.label.toLowerCase();
-        return l == 'pothole' || l == 'stairs' || l == 'construction' || l == 'crack' || l == 'pole' || l == 'pillar' || l == 'barrier';
-      }).toList();
+    // Auto-save high-hazard obstacles to GIS
+    final highHazards = verifiedObstacles.where((o) {
+      final l = o.label.toLowerCase();
+      return l == 'pothole' || l == 'stairs' || l == 'construction' || l == 'crack' || l == 'pole' || l == 'pillar' || l == 'barrier';
+    }).toList();
 
-      if (highHazards.isNotEmpty && _simulatedProximity >= 0.25) {
-        final now = DateTime.now();
-        if (_lastBarrierReportTime == null || now.difference(_lastBarrierReportTime!).inSeconds > 25) {
-          _recordBarrierToGis(specificLabel: highHazards.first.label, isManual: false);
-        }
+    if (highHazards.isNotEmpty && _simulatedProximity >= 0.25) {
+      final now = DateTime.now();
+      if (_lastBarrierReportTime == null || now.difference(_lastBarrierReportTime!).inSeconds > 25) {
+        _recordBarrierToGis(specificLabel: highHazards.first.label, isManual: false);
       }
     }
   }
@@ -553,6 +661,8 @@ YOUR TASK (STAGE 2 PROOFING & REFINEMENT):
         return 'สัญญาณไฟแดง หยุดรอ';
       case 'zebra_crossing':
         return 'ทางม้าลาย';
+      case 'intersection':
+        return 'ทางแยก';
       case 'pillar':
       case 'pole':
       case 'column':
@@ -824,6 +934,11 @@ YOUR TASK (STAGE 2 PROOFING & REFINEMENT):
         foregroundColor: Colors.white,
         actions: [
           IconButton(
+            icon: const Icon(Icons.flip_camera_ios_rounded, color: Colors.yellowAccent),
+            tooltip: 'สลับกล้องหน้า/หลัง',
+            onPressed: _switchCameraLens,
+          ),
+          IconButton(
             icon: Icon(_isFlashlightOn ? Icons.flashlight_on : Icons.flashlight_off),
             tooltip: 'เปิด/ปิดไฟฉาย',
             onPressed: _toggleFlashlight,
@@ -842,11 +957,7 @@ YOUR TASK (STAGE 2 PROOFING & REFINEMENT):
             child: Stack(
               fit: StackFit.expand,
               children: [
-                if (kIsWeb)
-                  const HtmlElementView(viewType: 'webcam-view')
-                else if (_isCameraInitialized && _cameraController != null)
-                  CameraPreview(_cameraController!)
-                else if (!_hasCameraPermission)
+                if (!_hasCameraPermission)
                   Container(
                     color: Colors.black,
                     child: Center(
@@ -869,22 +980,13 @@ YOUR TASK (STAGE 2 PROOFING & REFINEMENT):
                     ),
                   )
                 else
-                  Container(
-                    color: Colors.black,
-                    child: Center(
-                      child: Column(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          const Icon(Icons.camera_alt, color: Colors.white54, size: 64),
-                          const SizedBox(height: 16),
-                          Text(
-                            'กล้องไม่พร้อมใช้งานบนเว็บ ใช้อุปกรณ์มือถือเพื่อเปิดกล้อง',
-                            style: TextStyle(color: Colors.white, fontSize: 16 * acc.fontScale),
-                            textAlign: TextAlign.center,
-                          ),
-                        ],
-                      ),
-                    ),
+                  ExcludeSemantics(
+                    excluding: true,
+                    child: kIsWeb
+                        ? const HtmlElementView(viewType: 'webcam-view')
+                        : (_isCameraInitialized && _cameraController != null)
+                            ? CameraPreview(_cameraController!)
+                            : const SizedBox.shrink(),
                   ),
                 
                 if (_isScanning)
