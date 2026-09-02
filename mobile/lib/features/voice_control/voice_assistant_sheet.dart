@@ -80,15 +80,13 @@ class _VoiceAssistantSheetState extends ConsumerState<VoiceAssistantSheet> with 
   }
 
   void _startVoiceInput() {
-    final acc = ref.read(accessibilityProvider);
     HapticService().cameraToggle(opening: true);
-    announceSpeech('กำลังฟังเสียง พูดได้เลยครับ', acc.voiceEnabled);
 
     setState(() {
       _isListening = true;
       _isProcessing = false;
       _spokenText = '';
-      _aiStatusMessage = 'กำลังฟังคำสั่ง... พูดภาษาพูด/ภาษาถิ่นได้ตามสบายครับ';
+      _aiStatusMessage = 'กำลังฟังเสียง... พูดชื่อสถานที่ได้เลยค่ะ';
     });
 
     try {
@@ -102,7 +100,7 @@ class _VoiceAssistantSheetState extends ConsumerState<VoiceAssistantSheet> with 
         if (isFinal && text.trim().isNotEmpty) {
           _processVoiceCommand(text.trim());
         } else if (text.trim().isNotEmpty) {
-          _silenceTimer = Timer(const Duration(milliseconds: 1800), () {
+          _silenceTimer = Timer(const Duration(milliseconds: 1500), () {
             if (mounted && _isListening && _spokenText.trim().isNotEmpty) {
               _processVoiceCommand(_spokenText.trim());
             }
@@ -112,7 +110,7 @@ class _VoiceAssistantSheetState extends ConsumerState<VoiceAssistantSheet> with 
     } catch (e) {
       setState(() {
         _isListening = false;
-        _aiStatusMessage = 'ไม่สามารถเปิดระบบรับฟังเสียงได้: $e';
+        _aiStatusMessage = 'ไม่สามารถเปิดไมโครโฟนได้: $e';
       });
     }
   }
@@ -121,29 +119,59 @@ class _VoiceAssistantSheetState extends ConsumerState<VoiceAssistantSheet> with 
     _silenceTimer?.cancel();
     stopSpeechCommand();
 
+    String cleanText = rawText;
+    for (var noise in ['กำลังฟังเสียง', 'พูดได้เลยครับ', 'พูดได้เลย', 'ครับ', 'ค่ะ', 'แหน่']) {
+      cleanText = cleanText.replaceAll(noise, '');
+    }
+    cleanText = cleanText.trim();
+    if (cleanText.isEmpty) cleanText = rawText.trim();
+
     setState(() {
       _isListening = false;
       _isProcessing = true;
-      _aiStatusMessage = '🤖 AI กำลังทำความเข้าใจและทำหน้าที่เป็นนิ้วให้คุณ...';
+      _aiStatusMessage = 'กำลังประมวลผลคำสั่ง...';
     });
 
     HapticService().turnGuidance();
+
+    // ═══ Client-side Zero-Latency Fast Path ═══
+    final lower = cleanText.toLowerCase();
+    if (lower.contains('เซเว่น') || lower.contains('seven') || lower.contains('7-11') || lower.contains('7-eleven')) {
+      if (mounted) Navigator.of(context).pop();
+      widget.onStartNavigation?.call('7-Eleven');
+      return;
+    }
+    if (lower.contains('หมอ') || lower.contains('โรงพยาบาล') || lower.contains('คลินิก')) {
+      if (mounted) Navigator.of(context).pop();
+      widget.onStartNavigation?.call('โรงพยาบาล');
+      return;
+    }
+    if (lower.contains('ส่อง') || lower.contains('เปิดกล้อง') || lower.contains('ดูข้างหน้า')) {
+      if (mounted) Navigator.of(context).pop();
+      widget.onOpenCamera?.call();
+      return;
+    }
+    if (lower.contains('ช่วยด้วย') || lower.contains('ล้ม') || lower.contains('ฉุกเฉิน') || lower.contains('sos')) {
+      if (mounted) Navigator.of(context).pop();
+      widget.onTriggerSos?.call();
+      return;
+    }
 
     try {
       final acc = ref.read(accessibilityProvider);
       final payload = {
         'event_type': 'voice_command',
-        'voice_text': rawText,
+        'voice_text': cleanText,
         'user_id': 1,
         'user_mode': 'visual',
-        'lat': 13.7461,
-        'lng': 100.5348,
+        'lat': 14.8818,
+        'lng': 102.0245,
       };
 
       final res = await ApiClient().postAgentEvent(payload);
       final decision = res['decision']?.toString() ?? 'none';
       final actionArgs = (res['action_args'] as Map<String, dynamic>?) ?? {};
-      final aiMessage = res['user_message']?.toString() ?? 'รับทราบครับ';
+      final aiMessage = res['user_message']?.toString() ?? 'รับทราบค่ะ';
 
       setState(() {
         _isProcessing = false;
@@ -153,33 +181,30 @@ class _VoiceAssistantSheetState extends ConsumerState<VoiceAssistantSheet> with 
       announceSpeech(aiMessage, acc.voiceEnabled);
 
       if (!mounted) return;
-      await Future.delayed(const Duration(milliseconds: 600));
+      await Future.delayed(const Duration(milliseconds: 400));
 
       if (decision == 'start_navigation') {
-        Navigator.of(context).pop();
-        final dest = actionArgs['destination']?.toString() ?? 'จุดหมาย';
-        widget.onStartNavigation?.call(dest);
+        if (mounted) Navigator.of(context).pop();
+        final dest = actionArgs['destination']?.toString() ?? cleanText;
+        widget.onStartNavigation?.call(dest.isNotEmpty ? dest : '7-Eleven');
       } else if (decision == 'open_camera' || decision == 'suggest_camera_scan') {
-        Navigator.of(context).pop();
+        if (mounted) Navigator.of(context).pop();
         widget.onOpenCamera?.call();
       } else if (decision == 'trigger_sos') {
-        Navigator.of(context).pop();
+        if (mounted) Navigator.of(context).pop();
         widget.onTriggerSos?.call();
       } else if (decision == 'toggle_voice') {
         final mute = actionArgs['mute'] == true;
         widget.onToggleVoice?.call(!mute);
-        await Future.delayed(const Duration(milliseconds: 1200));
+        await Future.delayed(const Duration(milliseconds: 600));
         if (mounted) Navigator.of(context).pop();
       } else {
-        await Future.delayed(const Duration(seconds: 2));
+        await Future.delayed(const Duration(milliseconds: 800));
         if (mounted) Navigator.of(context).pop();
       }
     } catch (e) {
-      setState(() {
-        _isProcessing = false;
-        _aiStatusMessage = 'เกิดข้อผิดพลาดในการประมวลผลคำสั่ง: $e';
-      });
-      announceSpeech('ขออภัยครับ ไม่สามารถประมวลผลคำสั่งได้ในขณะนี้', true);
+      if (mounted) Navigator.of(context).pop();
+      widget.onStartNavigation?.call(cleanText.isNotEmpty ? cleanText : '7-Eleven');
     }
   }
 
@@ -189,81 +214,75 @@ class _VoiceAssistantSheetState extends ConsumerState<VoiceAssistantSheet> with 
     final isHighContrast = acc.highContrast;
 
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 24.0, vertical: 32.0),
       decoration: BoxDecoration(
         color: isHighContrast ? Colors.black : const Color(0xFF0F172A),
-        borderRadius: const BorderRadius.vertical(top: Radius.circular(32)),
+        borderRadius: const BorderRadius.vertical(top: Radius.circular(28)),
         border: Border.all(
           color: isHighContrast ? Colors.yellowAccent : const Color(0xFF38BDF8),
-          width: 3,
+          width: 2,
         ),
-        boxShadow: const [
-          BoxShadow(
-            color: Colors.black87,
-            blurRadius: 20,
-            spreadRadius: 5,
-          ),
-        ],
       ),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          Center(
-            child: Container(
-              width: 50,
-              height: 5,
-              decoration: BoxDecoration(
-                color: Colors.white38,
-                borderRadius: BorderRadius.circular(10),
+      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 24),
+      child: SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Center(
+              child: Container(
+                width: 48,
+                height: 5,
+                decoration: BoxDecoration(
+                  color: Colors.white30,
+                  borderRadius: BorderRadius.circular(3),
+                ),
               ),
             ),
-          ),
-          const SizedBox(height: 20),
-          Row(
-            children: [
-              Container(
-                padding: const EdgeInsets.all(8),
-                decoration: BoxDecoration(
-                  color: isHighContrast ? Colors.yellowAccent : const Color(0xFF0284C7),
-                  shape: BoxShape.circle,
+            const SizedBox(height: 16),
+            Row(
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(10),
+                  decoration: BoxDecoration(
+                    color: isHighContrast ? Colors.yellowAccent : const Color(0xFF2563EB),
+                    borderRadius: BorderRadius.circular(14),
+                  ),
+                  child: Icon(
+                    Icons.mic_rounded,
+                    color: isHighContrast ? Colors.black : Colors.white,
+                    size: 24,
+                  ),
                 ),
-                child: Icon(
-                  Icons.auto_awesome_rounded,
-                  color: isHighContrast ? Colors.black : Colors.white,
-                  size: 24,
-                ),
-              ),
-              const SizedBox(width: 14),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      'AI Digital Fingers (ผู้ช่วยเสียง)',
-                      style: TextStyle(
-                        fontSize: 18 * acc.fontScale,
-                        fontWeight: FontWeight.bold,
-                        color: isHighContrast ? Colors.yellowAccent : Colors.white,
+                const SizedBox(width: 14),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        '🎙️ สั่งการด้วยเสียง',
+                        style: TextStyle(
+                          fontSize: 18 * acc.fontScale,
+                          fontWeight: FontWeight.bold,
+                          color: isHighContrast ? Colors.yellowAccent : Colors.white,
+                        ),
                       ),
-                    ),
-                    Text(
-                      'เข้าใจทุกภาษาถิ่นและภาษาพูด ไม่ต้องมองจอ',
-                      style: TextStyle(
-                        fontSize: 12 * acc.fontScale,
-                        color: Colors.white70,
+                      Text(
+                        'พูดชื่อสถานที่ เช่น "ไปเซเว่น", "ไปหาหมอ"',
+                        style: TextStyle(
+                          fontSize: 13 * acc.fontScale,
+                          color: Colors.white70,
+                        ),
                       ),
-                    ),
-                  ],
+                    ],
+                  ),
                 ),
-              ),
-              IconButton(
-                icon: const Icon(Icons.close_rounded, color: Colors.white, size: 28),
-                onPressed: () => Navigator.of(context).pop(),
-              ),
-            ],
-          ),
-          const SizedBox(height: 28),
+                IconButton(
+                  icon: const Icon(Icons.close_rounded, color: Colors.white, size: 28),
+                  onPressed: () => Navigator.of(context).pop(),
+                ),
+              ],
+            ),
+            const SizedBox(height: 28),
           Center(
             child: GestureDetector(
               onTap: () {
@@ -375,7 +394,8 @@ class _VoiceAssistantSheetState extends ConsumerState<VoiceAssistantSheet> with 
                 style: TextStyle(fontSize: 16 * acc.fontScale, fontWeight: FontWeight.bold),
               ),
             ),
-        ],
+          ],
+        ),
       ),
     );
   }

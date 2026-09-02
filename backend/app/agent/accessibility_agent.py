@@ -21,40 +21,38 @@ from .tools import TOOL_REGISTRY, TOOL_DEFINITIONS
 # Mode-Specific System Prompts
 # ---------------------------------------------------------------------------
 _BASE_SYSTEM = """\
-You are the TAM Smart Accessibility Agent — the AI Digital Fingers and Voice Eyes for visually impaired, blind, and disabled users in Thailand.
+You are the TAM Smart Accessibility Agent — the AI Voice Navigator for blind users in Thailand.
 
-CRITICAL UNDERSTANDING POLICY (UNIVERSAL INCLUSIVITY & DIALECTS):
-1. ZERO-BARRIER LINGUISTIC EMPATHY:
-   The user may not have formal education. They will NEVER speak formal robotic computer commands.
-   They speak natural colloquial spoken Thai, rural regional dialects (e.g. Isan: "พาข้อยไปหาหมอแหน่", "ส่องให้แหน่ มีหยังขวางบ่", "ข้อยอยู่ไส", Northern: "ไปตี้...", Southern, street slang, incomplete phrases, repetitive words, or emotional distress).
-   ALWAYS deduce the true human intent with high empathy and compassion.
+CRITICAL RULES:
+1. LINGUISTIC UNDERSTANDING:
+   Accurately understand colloquial Thai and regional dialects (Isan, Northern, Southern, e.g. "พาข้อยไปหาหมอแหน่", "ส่องให้แหน่", "ไปเซเว่น", "ข้อยอยู่ไส").
 
-2. ACT AS THE USER'S DIGITAL FINGERS:
-   The visually impaired user cannot see the screen or touch small buttons. You MUST select the exact tool action so the app executes it for them:
-   - "start_navigation": user wants to go somewhere ("พาไป...", "ไปหาหมอ", "พาข้อยไปเซเว่นแหน่", "กลับบ้าน") -> action_args: {{"destination": "..."}}
-   - "open_camera" / "suggest_camera_scan": user wants to inspect what is ahead ("ส่องให้แหน่ มีหยังขวางบ่", "ดูข้างหน้าให้ที", "มืดจัง", "เปิดกล้อง")
-   - "trigger_sos": user fell down, injured, or in danger ("ช่วยข้อยแหน่ ล้มแล้ว", "โทรหาลูกที", "ช่วยด้วย", "บ่ไหวแล้ว") -> action_args: {{"reason": "ผู้ใช้แจ้งเหตุฉุกเฉิน"}}
-   - "get_location_context": user is lost or asks where they are ("ข้อยอยู่ไสหนิ", "หลงทางแล้ว", "ตอนนี้อยู่ที่ไหน")
-   - "toggle_voice": user wants silence or speech control ("เซาเว่าก่อน", "ปิดเสียง", "หนวกหู", "เปิดเสียง") -> action_args: {{"mute": true}}
-   - "find_nearest_facility": user looks for elevator, ramp, toilet ("ลิฟต์อยู่ไหน", "หาห้องน้ำให้แหน่") -> action_args: {{"facility_type": "elevator|ramp|toilet"}}
+2. ACTION MAPPING:
+   - "start_navigation": user mentions a destination or place ("เซเว่น", "ไปหาหมอ", "พาไป...") -> action_args: {"destination": "..."}
+   - "open_camera": user wants to check obstacles or see ahead ("ส่องให้แหน่", "ดูข้างหน้า", "เปิดกล้อง")
+   - "trigger_sos": user fell down, injured, or asks for emergency help ("ช่วยด้วย", "ล้ม", "ฉุกเฉิน")
+   - "get_location_context": user is lost ("อยู่ที่ไหน", "ข้อยอยู่ไส")
+   - "toggle_voice": silence / mute ("เซาเว่า", "ปิดเสียง") -> action_args: {"mute": true}
 
-3. SPOKEN VOICE RESPONSE:
-   Always respond in warm, polite, reassuring, simple spoken Thai (no jargon, friendly, compassionate, like a helpful family member).
+3. SPOKEN OUTPUT (STRICTLY CONCISE):
+   - "user_message" MUST be ONLY ONE short sentence (under 6 words in Thai).
+   - NEVER talk about yourself, dialects, or internal reasoning.
+   - Example: "กำลังนำทางไป 7-Eleven ค่ะ"
 
-Available tools: {tool_names}, start_navigation, open_camera, get_location_context, toggle_voice, find_nearest_facility
+Available tools: {tool_names}, start_navigation, open_camera, get_location_context, toggle_voice
 
-Respond ONLY with valid JSON in this format:
-{{
-  "thought": "<your reasoning about dialect and intent>",
-  "action": "<tool_name or 'none'>",
-  "action_args": {{ ... }},
-  "confidence": 0.0-1.0,
-  "user_message": "<Warm Thai spoken message for the user>"
-}}
+Respond ONLY with JSON:
+{
+  "thought": "<brief>",
+  "action": "<tool_name>",
+  "action_args": { ... },
+  "confidence": 0.95,
+  "user_message": "<Short Thai sentence>"
+}
 """
 
 _MODE_ADDENDUM = {
-    "visual": "Focus: obstacle proximity alerts (poles, drop-offs, construction), audio + haptic output, camera scan suggestions near dense obstacle zones.",
+    "visual": "Focus: obstacle alerts and direct navigation execution.",
 }
 
 
@@ -118,71 +116,75 @@ def _build_user_message(event: AgentEvent, context_summary: str) -> str:
 # ---------------------------------------------------------------------------
 # LLM Call (Groq)
 # ---------------------------------------------------------------------------
-def _load_api_key() -> Optional[str]:
-    for path in ["../.env", "../../.env", ".env", "c:/feefive/.env"]:
-        if os.path.exists(path):
+def _load_api_key(name: str, alt_names: list[str] = None) -> str:
+    all_keys = [name] + (alt_names or [])
+    for k in all_keys:
+        val = os.environ.get(k)
+        if val:
+            return val
+    env_paths = [
+        os.path.join(os.getcwd(), ".env"),
+        os.path.join(os.path.dirname(__file__), "..", "..", "..", ".env"),
+        os.path.join(os.path.dirname(__file__), "..", "..", ".env"),
+        r"c:\feefive\.env",
+    ]
+    for p in env_paths:
+        if os.path.exists(p):
             try:
-                with open(path, "r", encoding="utf-8") as f:
+                with open(p, "r", encoding="utf-8") as f:
                     for line in f:
                         if "=" in line and not line.strip().startswith("#"):
                             k, v = line.strip().split("=", 1)
-                            if k.strip() in ("Groq_api", "GROQ_API_KEY", "groq_api_key"):
-                                return v.strip()
+                            if k.strip() in all_keys:
+                                return v.strip().strip("'\"")
             except Exception:
                 pass
-    return os.environ.get("Groq_api") or os.environ.get("GROQ_API_KEY") or os.environ.get("groq_api_key")
+    return ""
 
-def _load_gemini_key() -> Optional[str]:
-    for path in ["../.env", "../../.env", ".env", "c:/feefive/.env", "c:/AccessGuardian AI/.env"]:
-        if os.path.exists(path):
-            try:
-                with open(path, "r", encoding="utf-8") as f:
-                    for line in f:
-                        if "=" in line and not line.strip().startswith("#"):
-                            k, v = line.strip().split("=", 1)
-                            if k.strip() in ("gemini_api_key", "GEMINI_API_KEY", "GOOGLE_API_KEY", "gemini_api"):
-                                return v.strip()
-            except Exception:
-                pass
-    return os.environ.get("gemini_api_key") or os.environ.get("GOOGLE_API_KEY") or os.environ.get("gemini_api")
+def _load_gemini_key() -> str:
+    return _load_api_key("gemini_api_key", ["GEMINI_API_KEY", "GOOGLE_API_KEY", "gemini_api"])
 
 def _rule_based_fallback(user_message: str) -> dict:
     """Universal rule-based intent fallback with Thai dialect understanding when offline."""
     msg = user_message.lower()
+    for noise in ["กำลังฟังเสียง", "พูดได้เลยครับ", "พูดได้เลย", "ครับ", "ค่ะ", "แหน่"]:
+        msg = msg.replace(noise.lower(), " ")
+    msg = msg.strip()
     
     # 1. Navigation intent (supports standard Thai & Isan/Northern/Southern dialects)
-    if any(w in msg for w in ["พาไป", "นำทางไป", "ไปที่", "เดินทางไป", "กลับบ้าน", "พาข้อยไป", "พาเฮาไป", "ไปหาหมอ"]):
-        dest = "จุดหมายปลายทาง"
-        for w in ["พาไป", "นำทางไป", "ไปที่", "เดินทางไป", "พาข้อยไป", "พาเฮาไป"]:
-            if w in msg:
-                dest = user_message.split(w, 1)[1].strip()
-                break
-        if "หมอ" in msg or "โรงพยาบาล" in msg:
-            dest = "โรงพยาบาล"
+    if any(w in msg for w in ["พาไป", "นำทาง", "ไปที่", "ไป", "เดินทาง", "กลับบ้าน", "พาข้อย", "พาเฮา", "เซเว่น", "seven", "7-eleven", "7-11", "หมอ", "โรงพยาบาล", "ตึก", "อาคาร"]):
+        dest = "7-Eleven" if any(w in msg for w in ["เซเว่น", "seven", "7-eleven", "7-11"]) else ("โรงพยาบาล" if any(w in msg for w in ["หมอ", "โรงพยาบาล"]) else "จุดหมาย")
+        if dest == "จุดหมาย":
+            for w in ["พาไป", "นำทางไป", "ไปที่", "เดินทางไป", "พาข้อยไป", "พาเฮาไป", "ไป"]:
+                if w in msg:
+                    dest = msg.split(w, 1)[1].strip()
+                    break
+        if not dest or dest == "จุดหมาย":
+            dest = msg
         return {
-            "thought": "ผู้ใช้ต้องการนำทางไปยังเป้าหมาย (เข้าใจภาษาถิ่น/ภาษาพูด)",
+            "thought": f"นำทางไปยัง {dest}",
             "action": "start_navigation",
             "action_args": {"destination": dest},
             "confidence": 0.95,
-            "user_message": f"รับทราบครับ กำลังนำทางไป{dest} ผ่านเส้นทางที่ปลอดภัยให้ครับ"
+            "user_message": f"กำลังนำทางไป {dest} ค่ะ"
         }
         
-    elif any(w in msg for w in ["หยุดนำทาง", "ยกเลิกการนำทาง", "หยุด", "พอแล้ว", "เซานำทาง"]):
+    elif any(w in msg for w in ["หยุดนำทาง", "ยกเลิก", "หยุด", "พอแล้ว", "เซานำทาง"]):
         return {
-            "thought": "ผู้ใช้ต้องการหยุดการนำทาง",
+            "thought": "หยุดนำทาง",
             "action": "stop_navigation",
             "action_args": {},
             "confidence": 0.98,
-            "user_message": "หยุดการนำทางเรียบร้อยแล้วครับ"
+            "user_message": "หยุดการนำทางแล้วค่ะ"
         }
 
     elif any(w in msg for w in ["ส่อง", "ดูข้างหน้า", "มีหยัง", "เปิดกล้อง", "มืด", "มองรอบๆ", "อ่านป้าย", "มีอะไรขวาง"]):
         return {
-            "thought": "ผู้ใช้ต้องการตรวจสอบภาพและสภาพแวดล้อมเฉพาะหน้า",
+            "thought": "เปิดกล้อง",
             "action": "open_camera",
-            "action_args": {"reason": "ผู้ใช้ร้องขอตรวจสอบสภาพแวดล้อม"},
+            "action_args": {"reason": "สแกนสิ่งกีดขวาง"},
             "confidence": 0.95,
-            "user_message": "เปิดกล้องส่องตรวจดูสิ่งกีดขวางข้างหน้าให้แล้วครับ"
+            "user_message": "เปิดกล้องส่องทางให้แล้วค่ะ"
         }
         
     elif any(w in msg for w in ["ช่วยด้วย", "ช่วยข้อย", "ฉุกเฉิน", "ล้ม", "เจ็บ", "sos", "เกิดอุบัติเหตุ", "โทรหา", "บ่ไหว"]):
