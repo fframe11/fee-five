@@ -21,32 +21,35 @@ from .tools import TOOL_REGISTRY, TOOL_DEFINITIONS
 # Mode-Specific System Prompts
 # ---------------------------------------------------------------------------
 _BASE_SYSTEM = """\
-You are the TAM Smart Accessibility Agent — a personal safety, obstacle detection, and navigation assistant \
-for visually impaired and blind users in Thailand.
+You are the TAM Smart Accessibility Agent — the AI Digital Fingers and Voice Eyes for visually impaired, blind, and disabled users in Thailand.
 
-Your primary focus:
-- Prioritize real-time audio descriptions and voice warnings in Thai.
-- Alert user about obstacle proximity (poles, steps, drop-offs, construction, uneven ground).
-- Guide user along safe walking corridors and tactile paving paths.
-- Provide clear, concise audio + haptic feedback.
+CRITICAL UNDERSTANDING POLICY (UNIVERSAL INCLUSIVITY & DIALECTS):
+1. ZERO-BARRIER LINGUISTIC EMPATHY:
+   The user may not have formal education. They will NEVER speak formal robotic computer commands.
+   They speak natural colloquial spoken Thai, rural regional dialects (e.g. Isan: "พาข้อยไปหาหมอแหน่", "ส่องให้แหน่ มีหยังขวางบ่", "ข้อยอยู่ไส", Northern: "ไปตี้...", Southern, street slang, incomplete phrases, repetitive words, or emotional distress).
+   ALWAYS deduce the true human intent with high empathy and compassion.
 
-Core rules:
-1. Reason step-by-step (Thought → Action → Observation pattern).
-2. NEVER trigger SOS unless confidence is HIGH and context confirms emergency.
-3. Camera is on-demand: use analyze_camera_frame ONLY when camera_frame_b64 is provided.
-4. If no action is needed, return action: "none" and explain why it is safe to continue.
-5. Keep Thai language in any user-facing message field (message, instruction, prompt).
-6. Always choose the MINIMUM intervention needed.
+2. ACT AS THE USER'S DIGITAL FINGERS:
+   The visually impaired user cannot see the screen or touch small buttons. You MUST select the exact tool action so the app executes it for them:
+   - "start_navigation": user wants to go somewhere ("พาไป...", "ไปหาหมอ", "พาข้อยไปเซเว่นแหน่", "กลับบ้าน") -> action_args: {{"destination": "..."}}
+   - "open_camera" / "suggest_camera_scan": user wants to inspect what is ahead ("ส่องให้แหน่ มีหยังขวางบ่", "ดูข้างหน้าให้ที", "มืดจัง", "เปิดกล้อง")
+   - "trigger_sos": user fell down, injured, or in danger ("ช่วยข้อยแหน่ ล้มแล้ว", "โทรหาลูกที", "ช่วยด้วย", "บ่ไหวแล้ว") -> action_args: {{"reason": "ผู้ใช้แจ้งเหตุฉุกเฉิน"}}
+   - "get_location_context": user is lost or asks where they are ("ข้อยอยู่ไสหนิ", "หลงทางแล้ว", "ตอนนี้อยู่ที่ไหน")
+   - "toggle_voice": user wants silence or speech control ("เซาเว่าก่อน", "ปิดเสียง", "หนวกหู", "เปิดเสียง") -> action_args: {{"mute": true}}
+   - "find_nearest_facility": user looks for elevator, ramp, toilet ("ลิฟต์อยู่ไหน", "หาห้องน้ำให้แหน่") -> action_args: {{"facility_type": "elevator|ramp|toilet"}}
 
-Available tools: {tool_names}
+3. SPOKEN VOICE RESPONSE:
+   Always respond in warm, polite, reassuring, simple spoken Thai (no jargon, friendly, compassionate, like a helpful family member).
+
+Available tools: {tool_names}, start_navigation, open_camera, get_location_context, toggle_voice, find_nearest_facility
 
 Respond ONLY with valid JSON in this format:
 {{
-  "thought": "<your reasoning>",
+  "thought": "<your reasoning about dialect and intent>",
   "action": "<tool_name or 'none'>",
   "action_args": {{ ... }},
   "confidence": 0.0-1.0,
-  "user_message": "<Thai message for the user, empty string if none>"
+  "user_message": "<Warm Thai spoken message for the user>"
 }}
 """
 
@@ -115,8 +118,22 @@ def _build_user_message(event: AgentEvent, context_summary: str) -> str:
 # ---------------------------------------------------------------------------
 # LLM Call (Groq)
 # ---------------------------------------------------------------------------
+def _load_api_key() -> Optional[str]:
+    for path in ["../.env", "../../.env", ".env", "c:/feefive/.env"]:
+        if os.path.exists(path):
+            try:
+                with open(path, "r", encoding="utf-8") as f:
+                    for line in f:
+                        if "=" in line and not line.strip().startswith("#"):
+                            k, v = line.strip().split("=", 1)
+                            if k.strip() in ("Groq_api", "GROQ_API_KEY", "groq_api_key"):
+                                return v.strip()
+            except Exception:
+                pass
+    return os.environ.get("Groq_api") or os.environ.get("GROQ_API_KEY") or os.environ.get("groq_api_key")
+
 def _load_gemini_key() -> Optional[str]:
-    for path in ["../.env", "../../.env", ".env", "c:/AccessGuardian AI/.env"]:
+    for path in ["../.env", "../../.env", ".env", "c:/feefive/.env", "c:/AccessGuardian AI/.env"]:
         if os.path.exists(path):
             try:
                 with open(path, "r", encoding="utf-8") as f:
@@ -130,83 +147,123 @@ def _load_gemini_key() -> Optional[str]:
     return os.environ.get("gemini_api_key") or os.environ.get("GOOGLE_API_KEY") or os.environ.get("gemini_api")
 
 def _rule_based_fallback(user_message: str) -> dict:
-    """Universal rule-based intent fallback when network is unavailable."""
+    """Universal rule-based intent fallback with Thai dialect understanding when offline."""
     msg = user_message.lower()
     
-    if any(w in msg for w in ["พาไป", "นำทางไป", "ไปที่", "เดินทางไป", "กลับบ้าน"]):
-        # Extract destination
+    # 1. Navigation intent (supports standard Thai & Isan/Northern/Southern dialects)
+    if any(w in msg for w in ["พาไป", "นำทางไป", "ไปที่", "เดินทางไป", "กลับบ้าน", "พาข้อยไป", "พาเฮาไป", "ไปหาหมอ"]):
         dest = "จุดหมายปลายทาง"
-        for w in ["พาไป", "นำทางไป", "ไปที่", "เดินทางไป"]:
+        for w in ["พาไป", "นำทางไป", "ไปที่", "เดินทางไป", "พาข้อยไป", "พาเฮาไป"]:
             if w in msg:
                 dest = user_message.split(w, 1)[1].strip()
                 break
+        if "หมอ" in msg or "โรงพยาบาล" in msg:
+            dest = "โรงพยาบาล"
         return {
-            "thought": "ผู้ใช้ต้องการนำทางไปยังเป้าหมาย",
+            "thought": "ผู้ใช้ต้องการนำทางไปยังเป้าหมาย (เข้าใจภาษาถิ่น/ภาษาพูด)",
             "action": "start_navigation",
             "action_args": {"destination": dest},
             "confidence": 0.95,
-            "user_message": f"กำลังเริ่มนำทางไป{dest} ผ่านเส้นทางที่ปลอดภัยค่ะ"
+            "user_message": f"รับทราบครับ กำลังนำทางไป{dest} ผ่านเส้นทางที่ปลอดภัยให้ครับ"
         }
         
-    elif any(w in msg for w in ["หยุดนำทาง", "ยกเลิกการนำทาง", "หยุด", "พอแล้ว"]):
+    elif any(w in msg for w in ["หยุดนำทาง", "ยกเลิกการนำทาง", "หยุด", "พอแล้ว", "เซานำทาง"]):
         return {
             "thought": "ผู้ใช้ต้องการหยุดการนำทาง",
             "action": "stop_navigation",
             "action_args": {},
             "confidence": 0.98,
-            "user_message": "หยุดการนำทางเรียบร้อยแล้วค่ะ"
+            "user_message": "หยุดการนำทางเรียบร้อยแล้วครับ"
+        }
+
+    elif any(w in msg for w in ["ส่อง", "ดูข้างหน้า", "มีหยัง", "เปิดกล้อง", "มืด", "มองรอบๆ", "อ่านป้าย", "มีอะไรขวาง"]):
+        return {
+            "thought": "ผู้ใช้ต้องการตรวจสอบภาพและสภาพแวดล้อมเฉพาะหน้า",
+            "action": "open_camera",
+            "action_args": {"reason": "ผู้ใช้ร้องขอตรวจสอบสภาพแวดล้อม"},
+            "confidence": 0.95,
+            "user_message": "เปิดกล้องส่องตรวจดูสิ่งกีดขวางข้างหน้าให้แล้วครับ"
         }
         
-    elif any(w in msg for w in ["ลิฟต์", "ลิฟท์", "ทางลาด", "ห้องน้ำ", "สถานี", "บันไดเลื่อน"]):
+    elif any(w in msg for w in ["ช่วยด้วย", "ช่วยข้อย", "ฉุกเฉิน", "ล้ม", "เจ็บ", "sos", "เกิดอุบัติเหตุ", "โทรหา", "บ่ไหว"]):
+        return {
+            "thought": "ตรวจพบคำสั่งขอความช่วยเหลือฉุกเฉิน",
+            "action": "trigger_sos",
+            "action_args": {"reason": "ผู้ใช้ร้องขอความช่วยเหลือฉุกเฉิน", "trigger_method": "voice"},
+            "confidence": 0.99,
+            "user_message": "กำลังส่งสัญญาณขอความช่วยเหลือและแจ้งผู้ดูแลให้ทันทีครับ ไม่ต้องกังวลนะครับ"
+        }
+
+    elif any(w in msg for w in ["อยู่ไส", "อยู่ไหน", "หลงทาง", "ที่นี่คือ", "ตรงไหน"]):
+        return {
+            "thought": "ผู้ใช้ต้องการทราบตำแหน่งปัจจุบันและจุดสังเกต",
+            "action": "get_location_context",
+            "action_args": {},
+            "confidence": 0.95,
+            "user_message": "กำลังตรวจสอบพิกัดและจุดสังเกตใกล้เคียงให้ครับ"
+        }
+
+    elif any(w in msg for w in ["เซาเว่า", "ปิดเสียง", "หนวกหู", "เงียบ", "อย่าเพิ่งพูด"]):
+        return {
+            "thought": "ผู้ใช้ต้องการปิดเสียงนำทางชั่วคราว",
+            "action": "toggle_voice",
+            "action_args": {"mute": True},
+            "confidence": 0.95,
+            "user_message": "ได้ครับ เดี๋ยวผมปิดเสียงเงียบก่อนนะครับ"
+        }
+        
+    elif any(w in msg for w in ["ลิฟต์", "ลิฟท์", "ทางลาด", "ห้องน้ำ", "สถานี"]):
         f_type = "elevator" if ("ลิฟต์" in msg or "ลิฟท์" in msg) else ("ramp" if "ทางลาด" in msg else ("toilet" if "ห้องน้ำ" in msg else "bts"))
         return {
             "thought": f"ผู้ใช้กำลังค้นหาสิ่งอำนวยความสะดวก: {f_type}",
             "action": "find_nearest_facility",
             "action_args": {"facility_type": f_type},
             "confidence": 0.92,
-            "user_message": f"กำลังค้นหา{f_type}ที่ใกล้ที่สุดและเข้าถึงได้สะดวกให้ค่ะ"
-        }
-        
-    elif any(w in msg for w in ["ช่วยด้วย", "ฉุกเฉิน", "ล้ม", "sos", "เกิดอุบัติเหตุ", "โทรหา"]):
-        return {
-            "thought": "ตรวจพบคำสั่งขอความช่วยเหลือฉุกเฉิน",
-            "action": "trigger_sos",
-            "action_args": {"reason": "ผู้ใช้ร้องขอความช่วยเหลือด้วยเสียง", "trigger_method": "voice"},
-            "confidence": 0.99,
-            "user_message": "กำลังส่งสัญญาณฉุกเฉินและแจ้งผู้ดูแลให้ทันทีค่ะ"
-        }
-        
-    elif any(w in msg for w in ["แจ้ง กทม", "แจ้งซ่อม", "ทางเท้าพัง", "ฝาท่อแตก", "หลุม"]):
-        return {
-            "thought": "ผู้ใช้ต้องการแจ้งซ่อมจุดเสี่ยงให้ กทม.",
-            "action": "report_hazard_to_bma",
-            "action_args": {"hazard_type": "broken_footpath", "description": user_message},
-            "confidence": 0.95,
-            "user_message": "บันทึกพิกัดและส่งเรื่องแจ้งซ่อมให้ กทม. ผ่าน Traffy Fondue เรียบร้อยแล้วค่ะ"
-        }
-        
-    elif any(w in msg for w in ["เปิดกล้อง", "มองรอบๆ", "อ่านป้าย", "มีอะไรขวาง"]):
-        return {
-            "thought": "ผู้ใช้ต้องการตรวจสอบภาพและสภาพแวดล้อม",
-            "action": "suggest_camera_scan",
-            "action_args": {"reason": "ผู้ใช้ร้องขอตรวจสอบสภาพแวดล้อม", "risk_zone_description": "พื้นที่ด้านหน้า"},
-            "confidence": 0.90,
-            "user_message": "เปิดกล้องเพื่อวิเคราะห์สิ่งกีดขวางและสภาพแวดล้อมให้แล้วค่ะ"
+            "user_message": f"กำลังค้นหา{f_type}ที่ใกล้ที่สุดและเข้าถึงสะดวกให้ครับ"
         }
         
     return {
-        "thought": "คำสั่งทั่วไป",
+        "thought": "คำสั่งทั่วไป เข้าใจภาษาพูด",
         "action": "none",
         "action_args": {},
         "confidence": 0.80,
-        "user_message": "รับทราบค่ะ TAM AI พร้อมช่วยเหลือคุณในการเดินทางเสมอค่ะ"
+        "user_message": "รับทราบครับ Fee Five พร้อมเป็นนิ้วและดวงตานำทางช่วยเหลือคุณเสมอครับ"
     }
 
 def _call_llm(system_prompt: str, user_message: str) -> dict:
-    # ─── PRIMARY PROVIDER: Google Gemini (3.5-flash / 3.7-flash) ───
+    import re
+    # ─── PROVIDER 1: Groq LPU (Qwen 3.8 27B / LLaMA) — Ultra-fast 0.5s dialect understanding ───
+    groq_key = _load_api_key()
+    if groq_key:
+        for model_id in ["qwen/qwen3.8-27b", "openai/gpt-oss-120b", "qwen/qwen3.6-27b"]:
+            try:
+                payload = {
+                    "model": model_id,
+                    "messages": [
+                        {"role": "system", "content": system_prompt},
+                        {"role": "user",   "content": user_message},
+                    ],
+                    "temperature": 0.1,
+                    "max_tokens": 800,
+                    "response_format": {"type": "json_object"},
+                }
+                req = urllib.request.Request(
+                    "https://api.groq.com/openai/v1/chat/completions",
+                    data=json.dumps(payload).encode("utf-8"),
+                    headers={"Authorization": f"Bearer {groq_key}", "Content-Type": "application/json", "User-Agent": "TAM-Agent/1.0"},
+                    method="POST",
+                )
+                with urllib.request.urlopen(req, timeout=4) as resp:
+                    body = json.loads(resp.read().decode("utf-8"))
+                    content = body["choices"][0]["message"]["content"]
+                    return json.loads(content)
+            except Exception as e:
+                print(f"[Agent Brain] Groq ({model_id}) error: {e}")
+
+    # ─── PROVIDER 2: Google Gemini (3.6-flash / flash-latest) ───
     gemini_key = _load_gemini_key()
     if gemini_key:
-        for model_name in ["gemini-3.5-flash", "gemini-3.7-flash", "gemini-flash-latest"]:
+        for model_name in ["gemini-3.6-flash", "gemini-flash-latest", "gemini-3.7-flash"]:
             try:
                 url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:generateContent?key={gemini_key}"
                 full_prompt = f"{system_prompt}\n\nUser Event / Voice Command:\n{user_message}\n\nRespond strictly with JSON matching the required schema."
@@ -220,10 +277,10 @@ def _call_llm(system_prompt: str, user_message: str) -> dict:
                 req = urllib.request.Request(
                     url,
                     data=json.dumps(payload).encode("utf-8"),
-                    headers={"Content-Type": "application/json"},
+                    headers={"Content-Type": "application/json", "User-Agent": "TAM-Agent/1.0"},
                     method="POST"
                 )
-                with urllib.request.urlopen(req, timeout=8) as resp:
+                with urllib.request.urlopen(req, timeout=5) as resp:
                     data = json.loads(resp.read().decode("utf-8"))
                     text = data["candidates"][0]["content"]["parts"][0]["text"].strip()
                     if text.startswith("```"):
@@ -233,35 +290,8 @@ def _call_llm(system_prompt: str, user_message: str) -> dict:
             except Exception as e:
                 print(f"[Agent Brain] Gemini ({model_name}) error: {e}")
 
-    # ─── SECONDARY FALLBACK: Groq LLaMA-3.3 70B ───
-    groq_key = _load_api_key()
-    if groq_key:
-        try:
-            payload = {
-                "model": "llama-3.3-70b-versatile",
-                "messages": [
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user",   "content": user_message},
-                ],
-                "temperature": 0.1,
-                "max_tokens": 800,
-                "response_format": {"type": "json_object"},
-            }
-            req = urllib.request.Request(
-                "https://api.groq.com/openai/v1/chat/completions",
-                data=json.dumps(payload).encode("utf-8"),
-                headers={"Authorization": f"Bearer {groq_key}", "Content-Type": "application/json"},
-                method="POST",
-            )
-            with urllib.request.urlopen(req, timeout=5) as resp:
-                body = json.loads(resp.read().decode("utf-8"))
-                content = body["choices"][0]["message"]["content"]
-                return json.loads(content)
-        except Exception as e:
-            print(f"[Agent Brain] Groq fallback error: {e}")
-
-    # ─── TERTIARY OFFLINE FALLBACK: Instant Rule-based Intent Engine ───
-    print("[Agent Brain] Switching to Zero-Latency Local Intent Fallback.")
+    # ─── PROVIDER 3: Zero-Latency Local Dialect Intent Fallback ───
+    print("[Agent Brain] Switching to Zero-Latency Local Dialect Intent Fallback.")
     return _rule_based_fallback(user_message)
 
 
@@ -340,6 +370,7 @@ def run_agent(event: AgentEvent) -> dict:
     # 5. Return structured response to API router
     return {
         "decision": action_name,
+        "action_args": action_args,
         "confidence": confidence,
         "thought": thought,
         "user_message": user_message_out,

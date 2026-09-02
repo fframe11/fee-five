@@ -62,6 +62,7 @@ class PushEventRequest(BaseModel):
 
 class AgentResponse(BaseModel):
     decision: str
+    action_args: dict = {}
     confidence: float
     thought: str
     user_message: str
