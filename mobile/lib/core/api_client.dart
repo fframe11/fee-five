@@ -41,11 +41,12 @@ class ApiClient {
 
   // 1. Auth: User registration
   Future<Map<String, dynamic>> register(String email, String password) async {
-    final url = Uri.parse('$baseUrl/api/auth/register');
+    final url = Uri.parse('$baseUrl/api/v1/auth/register');
     final response = await http.post(
       url,
       headers: _headers(),
       body: jsonEncode({
+        'name': email.split('@').first,
         'email': email,
         'password': password,
       }),
@@ -59,7 +60,7 @@ class ApiClient {
 
   // 2. Auth: Token retrieval / Login
   Future<String> login(String username, String password) async {
-    final url = Uri.parse('$baseUrl/api/auth/token');
+    final url = Uri.parse('$baseUrl/api/v1/auth/login');
     
     // OAuth2 password flow expects x-www-form-urlencoded body mapping
     final response = await http.post(
@@ -84,8 +85,8 @@ class ApiClient {
 
   // 3. User: Update Preferences
   Future<Map<String, dynamic>> updatePreferences(Map<String, dynamic> preferences) async {
-    final url = Uri.parse('$baseUrl/api/users/me/preferences');
-    final response = await http.put(
+    final url = Uri.parse('$baseUrl/api/v1/users/me/preferences');
+    final response = await http.patch(
       url,
       headers: _headers(),
       body: jsonEncode(preferences),
@@ -99,7 +100,7 @@ class ApiClient {
 
   // 4. Barriers: Proximity query filtering active obstructions
   Future<List<dynamic>> queryBarriers(double lat, double lng, double radiusMeters) async {
-    final url = Uri.parse('$baseUrl/api/barriers/proximity?lat=$lat&lng=$lng&radius=$radiusMeters');
+    final url = Uri.parse('$baseUrl/api/v1/accessibility/barriers');
     final response = await http.get(
       url,
       headers: _headers(),
@@ -118,7 +119,7 @@ class ApiClient {
     required String sosType,
     required double confidence,
   }) async {
-    final url = Uri.parse('$baseUrl/api/emergency/sos');
+    final url = Uri.parse('$baseUrl/api/v1/emergency/sos');
     final response = await http.post(
       url,
       headers: _headers(),
@@ -300,7 +301,7 @@ class ApiClient {
           return [];
         }
       }
-      final url = Uri.parse('$baseUrl/api/barriers/proximity?lat=$queryLat&lng=$queryLng&radius=2000');
+      final url = Uri.parse('$baseUrl/api/v1/accessibility/barriers');
       final response = await http.get(url, headers: _headers()).timeout(const Duration(seconds: 3));
       if (response.statusCode == 200) {
         return jsonDecode(response.body) as List<dynamic>;

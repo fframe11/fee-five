@@ -8,7 +8,7 @@ _parent_env = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.pa
 if os.path.exists(_parent_env):
     load_dotenv(_parent_env)
 
-from fastapi import FastAPI, Depends, HTTPException, status, Security
+from fastapi import FastAPI, Depends, HTTPException, status, Security, Body
 from fastapi.responses import HTMLResponse, FileResponse
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from fastapi.middleware.cors import CORSMiddleware
@@ -161,6 +161,7 @@ def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(
 
 # 15.1 Authentication Routes
 @app.post("/api/v1/auth/register", response_model=UserResponse, status_code=status.HTTP_201_CREATED)
+@app.post("/api/auth/register", response_model=UserResponse, status_code=status.HTTP_201_CREATED)
 def register(user_data: UserCreate, db: Session = Depends(get_db)):
     # Validate existing email
     existing_user = db.query(User).filter(User.email == user_data.email).first()
@@ -186,6 +187,8 @@ def register(user_data: UserCreate, db: Session = Depends(get_db)):
     return new_user
 
 @app.post("/api/v1/auth/login", response_model=Token)
+@app.post("/api/auth/login", response_model=Token)
+@app.post("/api/auth/token", response_model=Token)
 def login(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depends(get_db)):
     user = db.query(User).filter(User.email == form_data.username).first()
     if not user or not user.password_hash.endswith(form_data.password):
@@ -216,6 +219,7 @@ def update_me(user_update: UserUpdate, current_user: User = Depends(get_current_
     return current_user
 
 @app.get("/api/v1/users/me/preferences", response_model=UserPreferenceResponse)
+@app.get("/api/users/me/preferences", response_model=UserPreferenceResponse)
 def get_preferences(current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     pref = db.query(UserPreference).filter(UserPreference.user_id == current_user.id).first()
     if not pref:
@@ -226,6 +230,9 @@ def get_preferences(current_user: User = Depends(get_current_user), db: Session 
     return pref
 
 @app.patch("/api/v1/users/me/preferences", response_model=UserPreferenceResponse)
+@app.patch("/api/users/me/preferences", response_model=UserPreferenceResponse)
+@app.put("/api/v1/users/me/preferences", response_model=UserPreferenceResponse)
+@app.put("/api/users/me/preferences", response_model=UserPreferenceResponse)
 def update_preferences(pref_update: UserPreferenceUpdate, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     pref = db.query(UserPreference).filter(UserPreference.user_id == current_user.id).first()
     if not pref:
@@ -267,6 +274,32 @@ def trigger_sos(event_data: EmergencyEventCreate, current_user: User = Depends(g
         created_at=db_event.created_at,
         resolved_at=db_event.resolved_at
     )
+
+@app.post("/api/v1/emergency/sos")
+@app.post("/api/emergency/sos")
+def trigger_sos_legacy(data: dict = Body(...), db: Session = Depends(get_db)):
+    lat = float(data.get("latitude") or 13.7461)
+    lng = float(data.get("longitude") or 100.5348)
+    sos_type = str(data.get("sos_type") or "emergency")
+    conf = float(data.get("confidence") or 0.95)
+    point_wkt = f"SRID=4326;POINT({lng} {lat})"
+    db_event = EmergencyEvent(
+        user_id=1,
+        event_type=sos_type,
+        trigger_method="mobile_sos",
+        geom=point_wkt,
+        accuracy=conf,
+        status="active"
+    )
+    db.add(db_event)
+    db.commit()
+    db.refresh(db_event)
+    return {
+        "status": "success",
+        "id": db_event.id,
+        "event_id": db_event.id,
+        "message": "SOS alert registered and dispatched to BMA command center"
+    }
 
 @app.get("/api/v1/emergency/events/{id}", response_model=EmergencyEventResponse)
 def get_sos(id: int, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):

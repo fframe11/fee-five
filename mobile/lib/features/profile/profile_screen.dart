@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../../core/accessibility_notifier.dart';
+import '../../core/api_client.dart';
 import '../../core/app_colors.dart';
 import '../../core/services/haptic_service.dart';
 
@@ -503,7 +504,7 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                 trailing: const Icon(Icons.open_in_new_rounded, color: Colors.amberAccent),
                 onTap: () {
                   launchUrl(
-                    Uri.parse('http://127.0.0.1:8000/dashboard'),
+                    Uri.parse('${ApiClient.getDefaultBaseUrl()}/dashboard'),
                     mode: LaunchMode.externalApplication,
                   );
                 },
