@@ -32,8 +32,8 @@ ENV PATH="/opt/venv/bin:$PATH" \
     PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1
 
-# Create non-root system user for secure container execution
-RUN useradd --system --create-home appuser
+# Create non-root system user and grant write permissions for SQLite database operations
+RUN useradd --system --create-home appuser && chown -R appuser:appuser /app && chmod 777 /app
 USER appuser
 
 # Copy application source code and pre-seeded SQLite database

@@ -61,6 +61,23 @@ app.add_middleware(
 app.include_router(agent_router)
 app.include_router(gtfs_router)
 
+@app.get("/")
+def root():
+    return {
+        "message": "FeeFive Transformation Accessibility Mass AI Backend is Live!",
+        "status": "healthy",
+        "docs": "/docs",
+        "health": "/api/v1/health",
+        "download_apk": "/download-apk",
+        "endpoints": {
+            "vision_proofing": "POST /api/v1/vision/analyze",
+            "voice_agent": "POST /api/v1/agent/chat",
+            "gis_points": "GET /api/v1/gis/points",
+            "gis_barriers": "GET /api/v1/gis/barriers",
+            "gtfs_routes": "GET /api/v1/gtfs/routes",
+        }
+    }
+
 @app.get("/api/v1/health")
 @app.get("/health")
 def health_check():

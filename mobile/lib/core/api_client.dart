@@ -19,8 +19,8 @@ class ApiClient {
     const envUrl = String.fromEnvironment('BACKEND_URL');
     if (envUrl.isNotEmpty) return envUrl;
 
-    // Default to computer LAN IP so mobile device on same WiFi connects seamlessly
-    return 'http://10.0.183.244:8000';
+    // Default to Live Production Render Cloud Backend
+    return 'https://fee-five.onrender.com';
   }
 
   ApiClient({String? baseUrl}) : baseUrl = baseUrl ?? getDefaultBaseUrl();
