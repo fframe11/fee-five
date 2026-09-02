@@ -233,6 +233,8 @@ class _NavigationScreenState extends ConsumerState<NavigationScreen>
         );
         if (mounted) {
           setState(() {
+            _customOriginLat = null;
+            _customOriginLng = null;
             _originController.text = "ตำแหน่งปัจจุบัน (${position.latitude.toStringAsFixed(4)}, ${position.longitude.toStringAsFixed(4)})";
           });
           sendUserLocationMessage(
@@ -240,6 +242,10 @@ class _NavigationScreenState extends ConsumerState<NavigationScreen>
             longitude: position.longitude,
             label: "📍 ตำแหน่งจริงของคุณ",
           );
+          _recomputeRoute();
+          if (_isNavigating) {
+            _startNavigation();
+          }
         }
       }
     } catch (_) {
@@ -263,15 +269,17 @@ class _NavigationScreenState extends ConsumerState<NavigationScreen>
     });
 
     _destDebounceTimer = Timer(const Duration(milliseconds: 250), () async {
-      double? uLat;
-      double? uLon;
-      try {
-        final pos = await Geolocator.getLastKnownPosition();
-        if (pos != null) {
-          uLat = pos.latitude;
-          uLon = pos.longitude;
-        }
-      } catch (_) {}
+      double? uLat = _customOriginLat;
+      double? uLon = _customOriginLng;
+      if (uLat == null || uLon == null) {
+        try {
+          final pos = await Geolocator.getLastKnownPosition();
+          if (pos != null) {
+            uLat = pos.latitude;
+            uLon = pos.longitude;
+          }
+        } catch (_) {}
+      }
 
       final results = await PlaceSearchService.searchPlaces(q, userLat: uLat, userLon: uLon);
       if (mounted) {
@@ -284,18 +292,20 @@ class _NavigationScreenState extends ConsumerState<NavigationScreen>
   }
 
   void _selectDestination(Map<String, dynamic> item) {
+    final lat = (item['lat'] as num).toDouble();
+    final lon = (item['lon'] as num).toDouble();
     setState(() {
       _destController.text = item['name'] ?? item['display_name'];
-      _customDestLat = (item['lat'] as num).toDouble();
-      _customDestLng = (item['lon'] as num).toDouble();
+      _customDestLat = lat;
+      _customDestLng = lon;
       _destSuggestions = [];
       _isSearchingDest = false;
     });
     FocusScope.of(context).unfocus();
-    if (_customDestLat != null && _customDestLng != null) {
-      try {
-        _mapController.move(ll.LatLng(_customDestLat!, _customDestLng!), 16.0);
-      } catch (_) {}
+
+    _recomputeRoute();
+    if (_isNavigating) {
+      _startNavigation();
     }
   }
 
@@ -336,17 +346,102 @@ class _NavigationScreenState extends ConsumerState<NavigationScreen>
   }
 
   void _selectOrigin(Map<String, dynamic> item) {
+    final lat = (item['lat'] as num).toDouble();
+    final lon = (item['lon'] as num).toDouble();
     setState(() {
       _originController.text = item['name'] ?? item['display_name'];
-      _customOriginLat = (item['lat'] as num).toDouble();
-      _customOriginLng = (item['lon'] as num).toDouble();
+      _customOriginLat = lat;
+      _customOriginLng = lon;
       _originSuggestions = [];
       _isSearchingOrigin = false;
     });
     FocusScope.of(context).unfocus();
-    if (_customOriginLat != null && _customOriginLng != null) {
+
+    _recomputeRoute();
+    if (_isNavigating) {
+      _startNavigation();
+    }
+  }
+
+  Future<void> _recomputeRoute() async {
+    // 1. Resolve Origin GPS
+    double originLat = 0, originLng = 0;
+    if (_customOriginLat != null && _customOriginLng != null && _customOriginLat != 0.0) {
+      originLat = _customOriginLat!;
+      originLng = _customOriginLng!;
+    } else {
       try {
-        _mapController.move(ll.LatLng(_customOriginLat!, _customOriginLng!), 16.0);
+        final pos = await Geolocator.getCurrentPosition(
+          desiredAccuracy: LocationAccuracy.high,
+          timeLimit: const Duration(seconds: 3),
+        );
+        originLat = pos.latitude;
+        originLng = pos.longitude;
+      } catch (_) {
+        originLat = 14.8818;
+        originLng = 102.0245;
+      }
+    }
+
+    // 2. Resolve Destination GPS
+    double destLat = 0, destLng = 0;
+    final destName = _destController.text.trim();
+    if (destName.isEmpty) return;
+
+    if (_customDestLat != null && _customDestLng != null && _customDestLat != 0.0) {
+      destLat = _customDestLat!;
+      destLng = _customDestLng!;
+    } else {
+      final searchResults = await PlaceSearchService.searchPlaces(destName, userLat: originLat, userLon: originLng);
+      if (searchResults.isNotEmpty) {
+        destLat = searchResults.first.lat;
+        destLng = searchResults.first.lon;
+        _customDestLat = destLat;
+        _customDestLng = destLng;
+      }
+    }
+
+    if (destLat == 0.0 && destLng == 0.0) return;
+
+    // 3. Compute straight distance & query real OSRM route
+    final straightDist = Geolocator.distanceBetween(originLat, originLng, destLat, destLng);
+    final isLongDistance = straightDist > 25000;
+    final profile = isLongDistance ? 'driving' : 'walking';
+
+    final osrmRoute = await OsrmRoutingService.getWalkingRoute(
+      originLat: originLat,
+      originLon: originLng,
+      destLat: destLat,
+      destLon: destLng,
+      profile: profile,
+    );
+
+    if (mounted) {
+      setState(() {
+        _activeOsrmRoute = osrmRoute;
+        if (osrmRoute != null && osrmRoute.steps.isNotEmpty) {
+          _remainingDistance = osrmRoute.totalDistanceMeters.round();
+          _liveInstruction = osrmRoute.steps.first.instruction;
+          _liveDirectionIcon = _getManeuverIcon(osrmRoute.steps.first.maneuverModifier);
+        } else {
+          _remainingDistance = straightDist.round();
+          final distText = _remainingDistance > 1000 ? '${(_remainingDistance / 1000).toStringAsFixed(1)} กม.' : '$_remainingDistance ม.';
+          _liveInstruction = "มุ่งหน้าไปยัง $destName (ระยะทาง $distText)";
+          _liveDirectionIcon = Icons.arrow_upward_rounded;
+        }
+      });
+
+      // Fit map view to cover both points
+      try {
+        final minLat = math.min(originLat, destLat);
+        final maxLat = math.max(originLat, destLat);
+        final minLng = math.min(originLng, destLng);
+        final maxLng = math.max(originLng, destLng);
+        final bounds = LatLngBounds(
+          ll.LatLng(minLat - 0.005, minLng - 0.005),
+          ll.LatLng(maxLat + 0.005, maxLng + 0.005),
+        );
+        _mapController.fitCamera(CameraFit.bounds(bounds: bounds, padding: const EdgeInsets.all(60)));
       } catch (_) {}
     }
   }

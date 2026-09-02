@@ -438,6 +438,64 @@ class PlaceSearchService {
       'aliases': ['ตลาดร่วมใจ', 'ตลาดมทส', 'ไนท์มทส', 'ตลาดนัดมทส'],
     },
 
+    // Bangkok Landmarks & Universities
+    {
+      'name': 'จุฬาลงกรณ์มหาวิทยาลัย (Chulalongkorn University)',
+      'display_name': 'จุฬาลงกรณ์มหาวิทยาลัย, 254 ถ.พญาไท, แขวงวังใหม่, เขตปทุมวัน, กรุงเทพฯ',
+      'category': 'campus',
+      'lat': 13.7367,
+      'lon': 100.5331,
+      'aliases': ['จุฬา', 'จุฬาฯ', 'ม.จุฬา', 'chula', 'chulalongkorn', 'chulalongkorn university', 'cu'],
+    },
+    {
+      'name': 'สี่แยกราชประสงค์ (Ratchaprasong Intersection)',
+      'display_name': 'สี่แยกราชประสงค์ (หน้าเซ็นทรัลเวิลด์ / พระพรหม), ถ.พระราม 1, ปทุมวัน, กรุงเทพฯ',
+      'category': 'landmark',
+      'lat': 13.7443,
+      'lon': 100.5404,
+      'aliases': ['ราชประสงค์', 'สี่แยกราชประสงค์', 'แยกราชประสงค์', 'ratchaprasong', 'ratchaprasong intersection'],
+    },
+    {
+      'name': 'สยามพารากอน (Siam Paragon)',
+      'display_name': 'สยามพารากอน, 991 ถ.พระราม 1, ปทุมวัน, กรุงเทพฯ',
+      'category': 'landmark',
+      'lat': 13.7461,
+      'lon': 100.5348,
+      'aliases': ['พารากอน', 'สยามพารากอน', 'siam paragon', 'paragon'],
+    },
+    {
+      'name': 'เซ็นทรัลเวิลด์ (CentralWorld)',
+      'display_name': 'เซ็นทรัลเวิลด์, 999/9 ถ.พระราม 1, ปทุมวัน, กรุงเทพฯ',
+      'category': 'landmark',
+      'lat': 13.7466,
+      'lon': 100.5393,
+      'aliases': ['เซ็นทรัลเวิลด์', 'centralworld', 'central world', 'cwt'],
+    },
+    {
+      'name': 'สามย่านมิตรทาวน์ (Samyan Mitrtown)',
+      'display_name': 'สามย่านมิตรทาวน์, 944 ถ.พระราม 4, ปทุมวัน, กรุงเทพฯ',
+      'category': 'landmark',
+      'lat': 13.7335,
+      'lon': 100.5284,
+      'aliases': ['สามย่านมิตรทาวน์', 'สามย่าน', 'samyan mitrtown', 'samyan'],
+    },
+    {
+      'name': 'สี่แยกปทุมวัน (Pathumwan Intersection)',
+      'display_name': 'สี่แยกปทุมวัน (MBK / หอศิลป์ BACC), ถ.พระราม 1, กรุงเทพฯ',
+      'category': 'landmark',
+      'lat': 13.7462,
+      'lon': 100.5303,
+      'aliases': ['สี่แยกปทุมวัน', 'แยกปทุมวัน', 'ปทุมวัน', 'mbk', 'มาบุญครอง'],
+    },
+    {
+      'name': 'อนุสาวรีย์ชัยสมรภูมิ (Victory Monument)',
+      'display_name': 'อนุสาวรีย์ชัยสมรภูมิ, ถ.พญาไท, ราชเทวี, กรุงเทพฯ',
+      'category': 'transit',
+      'lat': 13.7649,
+      'lon': 100.5383,
+      'aliases': ['อนุสาวรีย์ชัย', 'อนุสาวรีย์ชัยสมรภูมิ', 'victory monument'],
+    },
+
     // Bangkok Transit Hubs
     {
       'name': 'BTS สยาม (Siam Station)',
