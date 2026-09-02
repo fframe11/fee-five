@@ -112,12 +112,17 @@ class OsrmRoutingService {
 
   static String _translateManeuverToThai(String type, String modifier, String roadName, double dist) {
     final distStr = dist > 1000 ? '${(dist / 1000).toStringAsFixed(1)} กม.' : '${dist.round()} เมตร';
-    final targetRoad = roadName.isNotEmpty ? 'เข้าสู่ $roadName' : '';
+    
+    // Filter out awkward or cryptic OpenStreetMap artifacts
+    String cleanRoad = roadName.trim();
+    for (var unwanted in ['ถนนทหารคนสนิท', 'ม.ทหารคนสนิท', 'ทหารคนสนิท', 'Unnamed Road', 'ทางหลวงชนบท', 'ทางหลวงแผ่นดิน']) {
+      cleanRoad = cleanRoad.replaceAll(unwanted, '').trim();
+    }
 
     if (type == 'depart') {
-      return 'เริ่มต้นเดินทาง มุ่งหน้าตรงไป $distStr';
+      return 'มุ่งหน้าตรงไป $distStr';
     } else if (type == 'arrive') {
-      return 'ถึงจุดหมายปลายทางของคุณแล้ว';
+      return 'ถึงจุดหมายปลายทางแล้วค่ะ';
     }
 
     String direction = 'ตรงไป';
@@ -137,10 +142,10 @@ class OsrmRoutingService {
       direction = 'กลับรถ';
     }
 
-    if (roadName.isNotEmpty) {
-      return '$direction $targetRoad (อีก $distStr)';
+    if (cleanRoad.isNotEmpty && cleanRoad.length > 2) {
+      return '$direction เข้าสู่ $cleanRoad อีก $distStr';
     } else {
-      return '$direction ตรงไป $distStr';
+      return '$direction อีก $distStr';
     }
   }
 }

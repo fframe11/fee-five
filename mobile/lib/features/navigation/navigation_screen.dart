@@ -177,8 +177,7 @@ class _NavigationScreenState extends ConsumerState<NavigationScreen>
   void didUpdateWidget(covariant NavigationScreen oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (widget.initialDestination != null &&
-        widget.initialDestination!.isNotEmpty &&
-        widget.initialDestination != oldWidget.initialDestination) {
+        widget.initialDestination!.isNotEmpty) {
       _startNavigationToDestination(widget.initialDestination!);
     }
   }
@@ -187,11 +186,8 @@ class _NavigationScreenState extends ConsumerState<NavigationScreen>
     setState(() {
       _destController.text = destination;
       _isLoading = true;
-      _liveInstruction = 'กำลังค้นหา $destination ที่ใกล้ที่สุด...';
+      _liveInstruction = 'กำลังนำทางไป $destination...';
     });
-
-    final acc = ref.read(accessibilityProvider);
-    announceSpeech('กำลังค้นหา $destination ที่ใกล้ที่สุดค่ะ', acc.voiceEnabled);
 
     // 1. Resolve origin GPS
     double originLat = 14.8818;
@@ -215,7 +211,6 @@ class _NavigationScreenState extends ConsumerState<NavigationScreen>
           _customDestLat = best.lat;
           _customDestLng = best.lon;
         });
-        announceSpeech('พบ ${best.name} ปักหมุดปลายทางเรียบร้อยแล้วค่ะ', acc.voiceEnabled);
       }
     } catch (_) {}
 
@@ -674,9 +669,10 @@ class _NavigationScreenState extends ConsumerState<NavigationScreen>
     // Default initial travel mode
     String recommendedMode = straightDist <= 1500 ? 'walk' : (straightDist <= 15000 ? 'transit' : 'ride_hail');
 
-    if (osrmRoute != null && osrmRoute.steps.isNotEmpty) {
-      _remainingDistance = osrmRoute.totalDistanceMeters.round();
-      final firstStep = osrmRoute.steps.first;
+    final RouteStep? firstStep = (osrmRoute != null && osrmRoute.steps.isNotEmpty) ? osrmRoute.steps.first : null;
+
+    if (firstStep != null) {
+      _remainingDistance = osrmRoute!.totalDistanceMeters.round();
       _liveInstruction = firstStep.instruction;
       _liveDirectionIcon = _getManeuverIcon(firstStep.maneuverModifier);
     } else {
@@ -698,7 +694,13 @@ class _NavigationScreenState extends ConsumerState<NavigationScreen>
       totalDistanceMeters: _remainingDistance.toDouble(),
     );
 
-    // ═══ Query AI ReAct Mobility Agent for Multi-Factor Decision ═══
+    // Announce clear, single navigation start instruction
+    final initialSpeech = firstStep != null
+        ? 'เริ่มนำทางสู่ $destName ${firstStep.instruction}'
+        : 'เริ่มนำทางสู่ $destName มุ่งหน้าตรงไปค่ะ';
+    announceSpeech(initialSpeech, acc.voiceEnabled);
+
+    // ═══ Query AI ReAct Mobility Agent for Multi-Factor Decision (Silent UI update) ═══
     ApiClient().getAiTransitDecision(
       originLat: originLat,
       originLng: originLng,
@@ -721,16 +723,8 @@ class _NavigationScreenState extends ConsumerState<NavigationScreen>
           _aiCostScore = (aiDecision['cost_score'] as num?)?.toInt() ?? 95;
           _aiTimeScore = (aiDecision['time_score'] as num?)?.toInt() ?? 80;
         });
-
-        if (_aiAgentSpeech.isNotEmpty) {
-          announceSpeech(_aiAgentSpeech, acc.voiceEnabled);
-        }
-      } else {
-        announceSpeech(_getDecisionDetailedSpeech(_currentTravelMode), acc.voiceEnabled);
       }
-    }).catchError((_) {
-      announceSpeech(_getDecisionDetailedSpeech(_currentTravelMode), acc.voiceEnabled);
-    });
+    }).catchError((_) {});
 
     // ═══ 4. Navigation Loop: Walk Simulation Mode vs Real Live GPS ═══
     if (_isSimulationMode) {
