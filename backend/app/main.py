@@ -573,10 +573,10 @@ def analyze_image(payload: VisionRequest):
     data_url = f"data:image/jpeg;base64,{raw_b64}"
     
     # ─── PROVIDER 1: Google Gemini Vision API ───
-    gemini_key = os.environ.get("gemini_api_key") or os.environ.get("GOOGLE_API_KEY") or os.environ.get("gemini_api")
+    gemini_key = os.environ.get("GEMINI_API_KEY") or os.environ.get("gemini_api_key") or os.environ.get("GOOGLE_API_KEY") or os.environ.get("gemini_api")
     if gemini_key:
         try:
-            for gemini_model in ["gemini-3.5-flash", "gemini-3.5-flash-lite", "gemini-flash-latest", "gemini-3.7-flash"]:
+            for gemini_model in ["gemini-3.6-flash", "gemini-2.5-flash", "gemini-flash-latest"]:
                 gemini_url = f"https://generativelanguage.googleapis.com/v1beta/models/{gemini_model}:generateContent?key={gemini_key}"
                 body = {
                     "contents": [
