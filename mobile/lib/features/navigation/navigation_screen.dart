@@ -1143,7 +1143,10 @@ class _NavigationScreenState extends ConsumerState<NavigationScreen> with Ticker
                           ],
                         ),
                         MarkerLayer(
-                          markers: _buildRouteDirectionMarkers(routePolylinePoints, isHighContrast),
+                          markers: [
+                            ..._buildRouteDirectionMarkers(routePolylinePoints, isHighContrast),
+                            ..._buildIntersectionMarkers(isHighContrast),
+                          ],
                         ),
                       ],
                       MarkerLayer(
@@ -3463,6 +3466,52 @@ class _NavigationScreenState extends ConsumerState<NavigationScreen> with Ticker
           ),
         ),
       );
+    }
+    return markers;
+  }
+
+  List<Marker> _buildIntersectionMarkers(bool isHighContrast) {
+    if (_activeOsrmRoute == null || _activeOsrmRoute!.steps.isEmpty) return [];
+    final List<Marker> markers = [];
+    for (int i = 0; i < _activeOsrmRoute!.steps.length; i++) {
+      final step = _activeOsrmRoute!.steps[i];
+      if (step.maneuverType == 'turn' || step.maneuverModifier.isNotEmpty || step.instruction.contains('เลี้ยว') || step.instruction.contains('แยก')) {
+        if (step.stepLat == 0.0 || step.stepLon == 0.0) continue;
+        markers.add(
+          Marker(
+            point: ll.LatLng(step.stepLat, step.stepLon),
+            width: 130,
+            height: 52,
+            alignment: Alignment.center,
+            child: GestureDetector(
+              onTap: () {
+                announceSpeech('ทางแยกข้างหน้า: ${step.instruction}', true);
+              },
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                    decoration: BoxDecoration(
+                      color: isHighContrast ? Colors.black : Colors.amber[900],
+                      borderRadius: BorderRadius.circular(6),
+                      border: Border.all(color: Colors.white, width: 1.2),
+                      boxShadow: const [BoxShadow(color: Colors.black38, blurRadius: 4)],
+                    ),
+                    child: Text(
+                      '🚦 แยก: ${step.roadName}',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(color: Colors.white, fontSize: 8.5, fontWeight: FontWeight.bold),
+                    ),
+                  ),
+                  Icon(Icons.traffic_rounded, color: Colors.amber[900], size: 22),
+                ],
+              ),
+            ),
+          ),
+        );
+      }
     }
     return markers;
   }
