@@ -88,7 +88,6 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
         icon: Icons.record_voice_over_rounded,
         label: 'นำทางเสียง',
         screen: NavigationScreen(
-          key: ValueKey(_navigationDestination ?? 'nav_default'),
           initialDestination: _navigationDestination,
           autoStart: _navigationDestination != null,
         ),
@@ -106,7 +105,10 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     }
 
     return Scaffold(
-      body: activeTabs[_currentIndex].screen,
+      body: IndexedStack(
+        index: _currentIndex,
+        children: activeTabs.map((tab) => tab.screen).toList(),
+      ),
       bottomNavigationBar: BottomNavigationBar(
         currentIndex: _currentIndex,
         backgroundColor: isHighContrast ? Colors.black : Colors.white,

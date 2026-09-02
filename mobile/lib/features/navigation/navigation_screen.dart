@@ -39,7 +39,11 @@ class NavigationScreen extends ConsumerStatefulWidget {
   ConsumerState<NavigationScreen> createState() => _NavigationScreenState();
 }
 
-class _NavigationScreenState extends ConsumerState<NavigationScreen> with TickerProviderStateMixin {
+class _NavigationScreenState extends ConsumerState<NavigationScreen>
+    with TickerProviderStateMixin, AutomaticKeepAliveClientMixin {
+  @override
+  bool get wantKeepAlive => true;
+
   final MapController _mapController = MapController();
   OsrmRouteResult? _activeOsrmRoute;
   double _mapZoom = 16.0;
@@ -1080,6 +1084,7 @@ class _NavigationScreenState extends ConsumerState<NavigationScreen> with Ticker
 
   @override
   Widget build(BuildContext context) {
+    super.build(context);
     final acc = ref.watch(accessibilityProvider);
     final isHighContrast = acc.highContrast;
     final primaryColor = AppColors.getPrimary(acc.colorBlind, isHighContrast: isHighContrast);
