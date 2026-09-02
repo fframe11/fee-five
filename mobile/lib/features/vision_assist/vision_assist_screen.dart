@@ -376,11 +376,13 @@ class _VisionAssistScreenState extends ConsumerState<VisionAssistScreen> with Ti
           debugPrint('[Stage 1 YOLO-World] Edge inference error: $e');
         }
 
-        // Use fast on-device edge detections immediately
-        proofedDetections = List.from(stage1Candidates);
+        // 🚀 ZERO-LATENCY FAST PATH: Update UI & Haptics immediately (0.05s) from On-Device AI
+        if (stage1Candidates.isNotEmpty) {
+          _updateObstaclesUI(stage1Candidates);
+        }
 
         // =====================================================================
-        // 🧠 STAGE 2: Gemini / Vision AI Proofing (Non-blocking enhancement)
+        // 🧠 STAGE 2: Gemini / Vision AI Proofing (Non-blocking background enhancement)
         // =====================================================================
         try {
           final candidateSummary = stage1Candidates.map((c) => {
@@ -395,20 +397,19 @@ STAGE 1 RAW YOLO-WORLD CANDIDATE DETECTIONS:
 ${jsonEncode(candidateSummary)}
 
 YOUR TASK (STAGE 2 PROOFING & REFINEMENT):
-1. **CRITICAL PRIORITY**: Detect if the user is currently at or approaching a "zebra_crossing" (ทางม้าลาย) or an "intersection" (ทางแยก / จุดตัดถนน). The user explicitly requested to focus on these! If present, add them with high confidence.
-2. Proof each Stage 1 candidate detection against the actual image:
+1. Detect physical structures and obstacles in front of the user (such as door, wall, pillar, chair, table, stairs, pothole, curb, barrier, zebra_crossing, intersection, person, vehicle).
+2. Proof each candidate detection:
    - If it is a FALSE POSITIVE, DISCARD it with "is_valid": false.
    - If it is a TRUE physical obstacle, CONFIRM it with "is_valid": true.
 3. Return ONLY a valid JSON array of objects without extra text:
 [
-  {"label": "zebra_crossing", "score": 0.99, "is_valid": true, "proof_reason": "พบทางม้าลายอยู่ด้านหน้า", "bbox_2d": [0, 0, 1000, 1000]},
-  {"label": "intersection", "score": 0.95, "is_valid": true, "proof_reason": "พบทางแยกด้านหน้า", "bbox_2d": [0, 0, 1000, 1000]}
+  {"label": "door", "score": 0.90, "is_valid": true, "proof_reason": "พบประตูทางเข้าด้านหน้า", "bbox_2d": [0, 0, 1000, 1000]}
 ]''';
 
           final description = await ApiClient().analyzeVisionImage(
             base64Img,
             prompt: proofingPrompt,
-          ).timeout(const Duration(milliseconds: 1500));
+          ).timeout(const Duration(milliseconds: 1200));
 
           String jsonStr = description.trim();
           final startIdx = jsonStr.indexOf('[');
@@ -426,21 +427,22 @@ YOUR TASK (STAGE 2 PROOFING & REFINEMENT):
               }
             }
             if (cloudVerified.isNotEmpty) {
-              proofedDetections = cloudVerified;
+              _updateObstaclesUI(cloudVerified);
             }
           }
         } catch (_) {
-          // Keep on-device stage1Candidates
+          // Fast on-device candidates already active
         }
       }
     } catch (e) {
       debugPrint('[Vision Pipeline] Frame capture error: $e');
     }
 
-    // =========================================================================
-    // 🎯 STAGE 3: Verified Output Generation & Accessibility Risk Assessment
-    // =========================================================================
-    _updateObstaclesUI(proofedDetections);
+    if (mounted && _isScanning && stage1Candidates.isEmpty) {
+      setState(() {
+        _isAnalyzingShot = false;
+      });
+    }
   }
 
   void _updateObstaclesUI(List<DetectedObstacle> proofedDetections) {
@@ -452,14 +454,9 @@ YOUR TASK (STAGE 2 PROOFING & REFINEMENT):
     double maxProximity = 0.0;
     List<String> warningsList = [];
 
-    // Filter to ONLY prioritize Zebra Crossings, Intersections, and Critical Hazards
-    // as requested by the user ("จับพวกแค่ทางม้าลาย ทางแยก")
-    final List<String> allowedFocus = ['zebra_crossing', 'intersection', 'pothole', 'stairs', 'vehicle', 'car', 'motorcycle'];
-
+    // Accept all indoor and outdoor obstacles with sensitivity threshold >= 25% (0.25)
     for (var obs in proofedDetections) {
-      if (!allowedFocus.contains(obs.label.toLowerCase())) {
-        continue; // Skip minor things like pillars, fans, chairs to reduce noise
-      }
+      if (obs.score < 0.25) continue; // Lowered from 0.55 to 0.25 for high sensitivity
 
       final assessment = AccessibilityRiskEngine.assess(obs, profile);
       verifiedObstacles.add(obs);
@@ -487,7 +484,7 @@ YOUR TASK (STAGE 2 PROOFING & REFINEMENT):
     } else if (verifiedObstacles.isNotEmpty) {
       final labels = verifiedObstacles.map((o) => _getThaiLabel(o.label)).toSet().join(', ');
       final distStr = _formatDistanceText(_getEstimatedDistanceMeters(_simulatedProximity));
-      announceSpeech('ตรวจพบ $labels ด้านหน้า ระยะ $distStr', acc.voiceEnabled);
+      announceSpeech('พบ $labels ด้านหน้า ระยะ $distStr', acc.voiceEnabled);
     }
 
     if (verifiedObstacles.isNotEmpty) {
@@ -990,12 +987,15 @@ YOUR TASK (STAGE 2 PROOFING & REFINEMENT):
                   ),
                 
                 if (_isScanning)
-                  CustomPaint(
-                    painter: BoundingBoxPainter(
-                      obstacles: _obstacles,
-                      proximity: _simulatedProximity,
-                      isHighContrast: isHighContrast,
-                      fontScale: acc.fontScale,
+                  ExcludeSemantics(
+                    excluding: true,
+                    child: CustomPaint(
+                      painter: BoundingBoxPainter(
+                        obstacles: _obstacles,
+                        proximity: _simulatedProximity,
+                        isHighContrast: isHighContrast,
+                        fontScale: acc.fontScale,
+                      ),
                     ),
                   ),
                 
@@ -1128,16 +1128,21 @@ YOUR TASK (STAGE 2 PROOFING & REFINEMENT):
           ),
         ],
       ),
-      floatingActionButton: FloatingActionButton.large(
-        heroTag: 'main_vision_scan_fab',
-        onPressed: _toggleScan,
-        backgroundColor: _isScanning ? Colors.red : (isHighContrast ? Colors.white : primaryColor),
-        foregroundColor: _isScanning ? Colors.white : (isHighContrast ? Colors.black : Colors.white),
-        tooltip: _isScanning ? 'หยุดสแกน' : 'เริ่มสแกน',
-        elevation: 10,
-        child: Icon(
-          _isScanning ? Icons.stop_rounded : Icons.search_rounded,
-          size: 48,
+      floatingActionButton: Semantics(
+        button: true,
+        label: _isScanning ? 'ปุ่มหยุดสแกนกล้อง' : 'ปุ่มเริ่มสแกนกล้องตรวจจับสิ่งกีดขวาง',
+        hint: 'แตะสองครั้งเพื่อ${_isScanning ? "หยุดสแกน" : "เริ่มสแกน"}',
+        child: FloatingActionButton.large(
+          heroTag: 'main_vision_scan_fab',
+          onPressed: _toggleScan,
+          backgroundColor: _isScanning ? Colors.red : (isHighContrast ? Colors.white : primaryColor),
+          foregroundColor: _isScanning ? Colors.white : (isHighContrast ? Colors.black : Colors.white),
+          tooltip: _isScanning ? 'หยุดสแกน' : 'เริ่มสแกน',
+          elevation: 10,
+          child: Icon(
+            _isScanning ? Icons.stop_rounded : Icons.search_rounded,
+            size: 48,
+          ),
         ),
       ),
       floatingActionButtonLocation: FloatingActionButtonLocation.centerFloat,

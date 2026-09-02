@@ -47,6 +47,7 @@ class _NavigationScreenState extends ConsumerState<NavigationScreen> with Ticker
   String _currentTravelMode = 'walk'; // 'walk' or 'transit'
   String _mapThemeStyle = 'guardian_cyber'; // 'guardian_cyber', 'minimal_slate', 'midnight_neon', 'traffic', 'satellite'
   bool _voiceOnlyMode = false;
+  bool _isSimulationMode = false; // 🚶‍♂️ Walk Simulation Mode for indoor testing
   final Set<String> _announcedHazards = {};
   String? _lastHazardAlert;
   
@@ -662,58 +663,185 @@ class _NavigationScreenState extends ConsumerState<NavigationScreen> with Ticker
       announceSpeech(_getDecisionDetailedSpeech(_currentTravelMode), acc.voiceEnabled);
     });
 
-    // ═══ 4. Real-time GPS Stream Navigation Loop ═══
-    int stepIdx = (osrmRoute != null && osrmRoute.steps.length > 1) ? 1 : 0;
-    _liveGpsSubscription?.cancel();
-    _liveGpsSubscription = Geolocator.getPositionStream(
-      locationSettings: const LocationSettings(
-        accuracy: LocationAccuracy.high,
-        distanceFilter: 3, // slightly higher to reduce micro-jitters
-      ),
-    ).listen((Position pos) {
-      if (!mounted || !_isNavigating) return;
+    // ═══ 4. Navigation Loop: Walk Simulation Mode vs Real Live GPS ═══
+    if (_isSimulationMode) {
+      _runSimulationWalk(osrmRoute, originLat, originLng, destLat, destLng, destName, acc);
+    } else {
+      int stepIdx = (osrmRoute != null && osrmRoute.steps.length > 1) ? 1 : 0;
+      _liveGpsSubscription?.cancel();
+      _liveGpsSubscription = Geolocator.getPositionStream(
+        locationSettings: const LocationSettings(
+          accuracy: LocationAccuracy.high,
+          distanceFilter: 3, // slightly higher to reduce micro-jitters
+        ),
+      ).listen((Position pos) {
+        if (!mounted || !_isNavigating) return;
 
-      // ป้องกัน GPS ผีหลอก (Jitter Filter)
-      if (pos.accuracy > 25.0) return; // ข้ามจุดที่ความแม่นยำต่ำ
-      if (pos.speed < 0.2) return; // ข้ามจุดที่ยืนนิ่ง (ความเร็วต่ำกว่า 0.2 m/s)
+        // ป้องกัน GPS ผีหลอก (Jitter Filter)
+        if (pos.accuracy > 25.0) return; // ข้ามจุดที่ความแม่นยำต่ำ
+        if (pos.speed < 0.2) return; // ข้ามจุดที่ยืนนิ่ง (ความเร็วต่ำกว่า 0.2 m/s)
 
-      final currentLat = pos.latitude;
-      final currentLng = pos.longitude;
-      final newDist = Geolocator.distanceBetween(currentLat, currentLng, destLat, destLng).round();
+        final currentLat = pos.latitude;
+        final currentLng = pos.longitude;
+        final newDist = Geolocator.distanceBetween(currentLat, currentLng, destLat, destLng).round();
 
-      // Proactive Hazard & Crosswalk Spoken Alerts (แจ้งเตือนล่วงหน้า 15-25 เมตร)
-      _checkProactiveHazardAlerts(currentLat, currentLng, acc, accuracy: pos.accuracy, speed: pos.speed.clamp(0.0, 3.0));
+        // Proactive Hazard & Crosswalk Spoken Alerts (แจ้งเตือนล่วงหน้า 15-25 เมตร)
+        _checkProactiveHazardAlerts(currentLat, currentLng, acc, accuracy: pos.accuracy, speed: pos.speed.clamp(0.0, 3.0));
 
-      setState(() {
-        _remainingDistance = newDist;
-        _gpsAccuracy = pos.accuracy;
-        final updatedDistText = _remainingDistance > 1000
-            ? '${(_remainingDistance / 1000).toStringAsFixed(1)} กม.'
-            : '$_remainingDistance ม.';
+        setState(() {
+          _remainingDistance = newDist;
+          _gpsAccuracy = pos.accuracy;
+          final updatedDistText = _remainingDistance > 1000
+              ? '${(_remainingDistance / 1000).toStringAsFixed(1)} กม.'
+              : '$_remainingDistance ม.';
 
-        if (_remainingDistance <= 15) {
-          _liveInstruction = "ถึง $destName เรียบร้อยแล้ว";
-          _liveDirectionIcon = Icons.check_circle_rounded;
-          announceSpeech("ถึง $destName เรียบร้อยแล้วค่ะ", acc.voiceEnabled);
-          _liveGpsSubscription?.cancel();
-        } else if (osrmRoute != null && osrmRoute.steps.isNotEmpty) {
-          if (stepIdx < osrmRoute.steps.length) {
-            final step = osrmRoute.steps[stepIdx];
-            final stepDist = Geolocator.distanceBetween(currentLat, currentLng, step.stepLat, step.stepLon);
-            if (stepDist < 20 && stepIdx < osrmRoute.steps.length - 1) {
-              stepIdx++;
-              final nextStep = osrmRoute.steps[stepIdx];
-              _liveInstruction = nextStep.instruction;
-              _liveDirectionIcon = _getManeuverIcon(nextStep.maneuverModifier);
-              announceSpeech(nextStep.instruction, acc.voiceEnabled);
-            } else {
-              _liveInstruction = "${step.instruction} (เหลืออีก $updatedDistText)";
+          if (_remainingDistance <= 15) {
+            _liveInstruction = "ถึง $destName เรียบร้อยแล้ว";
+            _liveDirectionIcon = Icons.check_circle_rounded;
+            HapticService().destinationReached();
+            announceSpeech("ถึง $destName เรียบร้อยแล้วค่ะ", acc.voiceEnabled);
+            _liveGpsSubscription?.cancel();
+          } else if (osrmRoute != null && osrmRoute.steps.isNotEmpty) {
+            if (stepIdx < osrmRoute.steps.length) {
+              final step = osrmRoute.steps[stepIdx];
+              final stepDist = Geolocator.distanceBetween(currentLat, currentLng, step.stepLat, step.stepLon);
+              if (stepDist < 20 && stepIdx < osrmRoute.steps.length - 1) {
+                stepIdx++;
+                final nextStep = osrmRoute.steps[stepIdx];
+                _liveInstruction = nextStep.instruction;
+                _liveDirectionIcon = _getManeuverIcon(nextStep.maneuverModifier);
+                HapticService().turnGuidance();
+                announceSpeech(nextStep.instruction, acc.voiceEnabled);
+              } else {
+                _liveInstruction = "${step.instruction} (เหลืออีก $updatedDistText)";
+              }
             }
+          } else {
+            _liveInstruction = "กำลังนำทางไป $destName เหลืออีก $updatedDistText";
           }
-        } else {
-          _liveInstruction = "กำลังนำทางไป $destName เหลืออีก $updatedDistText";
-        }
+        });
       });
+    }
+  }
+
+  /// 🚶‍♂️ Walk Simulation Mode (Demo/Indoor Testing)
+  /// จำลองการก้าวเดินตามถนนจริงทีละ 8–10 เมตร พร้อมแจ้งเตือนเลี้ยวล่วงหน้า 20 เมตร สั่น และเตือนจุดเสี่ยง
+  void _runSimulationWalk(
+    OsrmRouteResult? osrmRoute,
+    double originLat,
+    double originLng,
+    double destLat,
+    double destLng,
+    String destName,
+    AccessibilityState acc,
+  ) {
+    _navigationTimer?.cancel();
+    _liveGpsSubscription?.cancel();
+
+    // 1. สร้าง Waypoints ตามแนวเส้นทางถนนจริง (OSRM Polyline)
+    List<ll.LatLng> pathPoints = [];
+    if (osrmRoute != null && osrmRoute.polylineCoordinates.isNotEmpty) {
+      pathPoints = osrmRoute.polylineCoordinates
+          .map((pt) => ll.LatLng(pt[1], pt[0]))
+          .toList();
+    } else {
+      // Linear interpolation 25 จุดระหว่างจุดเริ่มต้นและปลายทาง
+      for (int i = 0; i <= 25; i++) {
+        final t = i / 25.0;
+        pathPoints.add(ll.LatLng(
+          originLat + (destLat - originLat) * t,
+          originLng + (destLng - originLng) * t,
+        ));
+      }
+    }
+
+    int currentPointIdx = 0;
+    int stepIdx = 0;
+    final totalSteps = osrmRoute?.steps.length ?? 0;
+
+    announceSpeech("เริ่มต้นโหมดจำลองการเดินก้าวต่อก้าว นำทางสู่ $destName", acc.voiceEnabled);
+    HapticService().turnGuidance();
+
+    _navigationTimer = Timer.periodic(const Duration(milliseconds: 1400), (timer) {
+      if (!mounted || !_isNavigating) {
+        timer.cancel();
+        return;
+      }
+
+      if (currentPointIdx < pathPoints.length) {
+        final currentPt = pathPoints[currentPointIdx];
+        final remaining = Geolocator.distanceBetween(
+          currentPt.latitude,
+          currentPt.longitude,
+          destLat,
+          destLng,
+        ).round();
+
+        // 1. ตรวจสอบจุดเสี่ยง/สิ่งกีดขวางตามแนวทางเดินจำลองล่วงหน้า 15-25 เมตร
+        _checkProactiveHazardAlerts(
+          currentPt.latitude,
+          currentPt.longitude,
+          acc,
+          accuracy: 2.0,
+          speed: 1.2,
+        );
+
+        // 2. เคลื่อนกล้องแผนที่ตามตำแหน่งจำลอง
+        try {
+          _mapController.move(currentPt, 17.5);
+        } catch (_) {}
+
+        // 3. ตรวจสอบขั้นตอนการเลี้ยว (Turn-by-Turn Instruction)
+        String instruction = _liveInstruction;
+        IconData icon = _liveDirectionIcon;
+
+        if (osrmRoute != null && osrmRoute.steps.isNotEmpty && stepIdx < totalSteps) {
+          final step = osrmRoute.steps[stepIdx];
+          final stepDist = Geolocator.distanceBetween(
+            currentPt.latitude,
+            currentPt.longitude,
+            step.stepLat,
+            step.stepLon,
+          );
+
+          // แจ้งเตือนล่วงหน้า 20-25 เมตรก่อนถึงทางแยก
+          if (stepDist < 25 && stepIdx < totalSteps - 1) {
+            stepIdx++;
+            final nextStep = osrmRoute.steps[stepIdx];
+            instruction = nextStep.instruction;
+            icon = _getManeuverIcon(nextStep.maneuverModifier);
+            HapticService().turnGuidance();
+            announceSpeech("อีก 20 เมตร ${nextStep.instruction}", acc.voiceEnabled);
+          } else {
+            final distText = remaining > 1000
+                ? '${(remaining / 1000).toStringAsFixed(1)} กม.'
+                : '$remaining ม.';
+            instruction = "${step.instruction} (เหลืออีก $distText)";
+          }
+        }
+
+        setState(() {
+          _remainingDistance = remaining;
+          _liveInstruction = instruction;
+          _liveDirectionIcon = icon;
+          _customOriginLat = currentPt.latitude;
+          _customOriginLng = currentPt.longitude;
+        });
+
+        currentPointIdx++;
+
+        // เมื่อถึงจุดหมายปลายทาง
+        if (currentPointIdx >= pathPoints.length || remaining <= 10) {
+          timer.cancel();
+          setState(() {
+            _remainingDistance = 0;
+            _liveInstruction = "ถึง $destName เรียบร้อยแล้ว (สิ้นสุดการจำลอง)";
+            _liveDirectionIcon = Icons.check_circle_rounded;
+          });
+          HapticService().destinationReached();
+          announceSpeech("ถึง $destName เรียบร้อยแล้วค่ะ สิ้นสุดการจำลองการเดิน", acc.voiceEnabled);
+        }
+      }
     });
   }
 
@@ -974,69 +1102,94 @@ class _NavigationScreenState extends ConsumerState<NavigationScreen> with Ticker
                   ];
                 }
 
-                return FlutterMap(
-                  mapController: _mapController,
-                  options: MapOptions(
-                    initialCenter: ll.LatLng(userLat, userLng),
-                    initialZoom: 16.5,
-                    minZoom: 12.0,
-                    maxZoom: 19.5,
-                    interactionOptions: const InteractionOptions(
-                      flags: InteractiveFlag.all,
-                    ),
-                    onPositionChanged: (camera, hasGesture) {
-                      _mapZoom = camera.zoom;
-                    },
-                  ),
-                  children: [
-                    TileLayer(
-                      key: ValueKey('map_tile_theme_$_mapThemeStyle'),
-                      urlTemplate: _getMapTileUrl(_mapThemeStyle),
-                      subdomains: _getMapSubdomains(_mapThemeStyle),
-                      userAgentPackageName: 'com.feefive.accessible_navigation',
-                      maxZoom: 20.0,
-                    ),
-                    if (routePolylinePoints.isNotEmpty) ...[
-                      PolylineLayer(
-                        polylines: [
-                          Polyline(
-                            points: routePolylinePoints,
-                            color: isHighContrast ? Colors.yellowAccent : const Color(0xFF2563EB),
-                            strokeWidth: 7.0,
-                            borderColor: Colors.white,
-                            borderStrokeWidth: 2.0,
-                          ),
-                        ],
+                return ExcludeSemantics(
+                  excluding: true,
+                  child: FlutterMap(
+                    mapController: _mapController,
+                    options: MapOptions(
+                      initialCenter: ll.LatLng(userLat, userLng),
+                      initialZoom: 16.5,
+                      minZoom: 12.0,
+                      maxZoom: 19.5,
+                      interactionOptions: const InteractionOptions(
+                        flags: InteractiveFlag.all,
                       ),
+                      onPositionChanged: (camera, hasGesture) {
+                        _mapZoom = camera.zoom;
+                      },
+                    ),
+                    children: [
+                      TileLayer(
+                        key: ValueKey('map_tile_theme_$_mapThemeStyle'),
+                        urlTemplate: _getMapTileUrl(_mapThemeStyle),
+                        subdomains: _getMapSubdomains(_mapThemeStyle),
+                        userAgentPackageName: 'com.feefive.accessible_navigation',
+                        maxZoom: 20.0,
+                      ),
+                      if (routePolylinePoints.isNotEmpty) ...[
+                        PolylineLayer(
+                          polylines: [
+                            Polyline(
+                              points: routePolylinePoints,
+                              color: isHighContrast ? Colors.yellowAccent : const Color(0xFF2563EB),
+                              strokeWidth: 7.0,
+                              borderColor: Colors.white,
+                              borderStrokeWidth: 2.0,
+                            ),
+                          ],
+                        ),
+                        MarkerLayer(
+                          markers: _buildRouteDirectionMarkers(routePolylinePoints, isHighContrast),
+                        ),
+                      ],
                       MarkerLayer(
-                        markers: _buildRouteDirectionMarkers(routePolylinePoints, isHighContrast),
-                      ),
-                    ],
-                    MarkerLayer(
-                      markers: [
-                        ..._buildGisMarkers(acc, isHighContrast),
-                        // User Current GPS Location Marker
-                        Marker(
-                          point: ll.LatLng(userLat, userLng),
-                          width: 50,
-                          height: 50,
-                          child: AnimatedBuilder(
-                            animation: _pulseAnimation,
-                            builder: (context, child) {
-                              return Stack(
-                                alignment: Alignment.center,
+                        markers: [
+                          ..._buildGisMarkers(acc, isHighContrast),
+                          // User Current GPS Location Marker
+                          Marker(
+                            point: ll.LatLng(userLat, userLng),
+                            width: 50,
+                            height: 50,
+                            child: AnimatedBuilder(
+                              animation: _pulseAnimation,
+                              builder: (context, child) {
+                                return Stack(
+                                  alignment: Alignment.center,
+                                  children: [
+                                    Container(
+                                      width: 36 * _pulseAnimation.value,
+                                      height: 36 * _pulseAnimation.value,
+                                      decoration: BoxDecoration(
+                                        shape: BoxShape.circle,
+                                        color: (isHighContrast ? Colors.yellowAccent : Colors.blueAccent).withOpacity((1.0 - _pulseAnimation.value).clamp(0.0, 1.0)),
+                                      ),
+                                    ),
+                                    Container(
+                                      width: 18,
+                                      height: 18,
+                                      decoration: BoxDecoration(
+                                        shape: BoxShape.circle,
+                                        color: isHighContrast ? Colors.yellowAccent : Colors.blue[600],
+                                        border: Border.all(color: Colors.white, width: 3),
+                                        boxShadow: const [BoxShadow(color: Colors.black26, blurRadius: 4)],
+                                      ),
+                                    ),
+                                  ],
+                                );
+                              },
+                            ),
+                          ),
+                          // Destination Target Marker
+                          if (hasDest)
+                            Marker(
+                              point: ll.LatLng(destLat, destLng),
+                              width: 140,
+                              height: 75,
+                              alignment: Alignment.topCenter,
+                              child: Column(
+                                mainAxisSize: MainAxisSize.min,
                                 children: [
                                   Container(
-                                    width: 36 * _pulseAnimation.value,
-                                    height: 36 * _pulseAnimation.value,
-                                    decoration: BoxDecoration(
-                                      shape: BoxShape.circle,
-                                      color: Colors.blueAccent.withOpacity((0.5 / _pulseAnimation.value).clamp(0.0, 0.5)),
-                                    ),
-                                  ),
-                                  Container(
-                                    width: 18,
-                                    height: 18,
                                     decoration: BoxDecoration(
                                       shape: BoxShape.circle,
                                       color: Colors.blue[800],
@@ -1328,7 +1481,71 @@ class _NavigationScreenState extends ConsumerState<NavigationScreen> with Ticker
                             ],
                           ),
                         ),
-                        const SizedBox(height: 12.0),
+                        const SizedBox(height: 10.0),
+                        // 🚶‍♂️ Walk Simulation Mode Switch (สำหรับทดสอบในอาคาร / ในห้อง)
+                        Container(
+                          margin: const EdgeInsets.only(bottom: 10.0),
+                          padding: const EdgeInsets.symmetric(horizontal: 12.0, vertical: 4.0),
+                          decoration: BoxDecoration(
+                            color: _isSimulationMode
+                                ? (isHighContrast ? Colors.yellow.withOpacity(0.2) : Colors.amber.withOpacity(0.12))
+                                : (isHighContrast ? Colors.grey[900] : Colors.grey[100]),
+                            borderRadius: BorderRadius.circular(10),
+                            border: Border.all(
+                              color: _isSimulationMode ? Colors.amber : Colors.grey.withOpacity(0.3),
+                              width: 1.2,
+                            ),
+                          ),
+                          child: Row(
+                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                            children: [
+                              Row(
+                                children: [
+                                  Icon(
+                                    Icons.directions_walk_rounded,
+                                    color: _isSimulationMode ? Colors.amber[800] : Colors.grey,
+                                    size: 22,
+                                  ),
+                                  const SizedBox(width: 8),
+                                  Column(
+                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    children: [
+                                      Text(
+                                        'โหมดจำลองการเดิน (Demo / Indoor)',
+                                        style: TextStyle(
+                                          fontSize: 13 * acc.fontScale,
+                                          fontWeight: FontWeight.bold,
+                                          color: _isSimulationMode ? (isHighContrast ? Colors.yellowAccent : Colors.amber[900]) : (isHighContrast ? Colors.white : Colors.black87),
+                                        ),
+                                      ),
+                                      Text(
+                                        _isSimulationMode ? 'ทดสอบก้าวเดิน เลี้ยวซ้าย/ขวา และสั่นในห้อง' : 'ใช้ดาวเทียม GPS สดภายนอกอาคาร',
+                                        style: TextStyle(
+                                          fontSize: 10 * acc.fontScale,
+                                          color: isHighContrast ? Colors.white60 : Colors.grey[600],
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ],
+                              ),
+                              Switch(
+                                value: _isSimulationMode,
+                                activeColor: Colors.amber[700],
+                                onChanged: (val) {
+                                  setState(() {
+                                    _isSimulationMode = val;
+                                  });
+                                  final acc = ref.read(accessibilityProvider);
+                                  announceSpeech(
+                                    val ? 'เปิดโหมดจำลองการเดินแล้ว เหมาะสำหรับทดสอบในห้องหรืออาคาร' : 'ปิดโหมดจำลอง สลับไปใช้ดาวเทียม GPS สดแล้ว',
+                                    acc.voiceEnabled,
+                                  );
+                                },
+                              ),
+                            ],
+                          ),
+                        ),
                         SizedBox(
                           width: double.infinity,
                           height: 50.0,
@@ -2219,6 +2436,71 @@ class _NavigationScreenState extends ConsumerState<NavigationScreen> with Ticker
               ],
             ),
             const Spacer(),
+
+            // 🚶‍♂️ Walk Simulation Mode Switch for Voice Users
+            Container(
+              margin: const EdgeInsets.only(bottom: 12.0),
+              padding: const EdgeInsets.symmetric(horizontal: 14.0, vertical: 8.0),
+              decoration: BoxDecoration(
+                color: _isSimulationMode
+                    ? (isHighContrast ? Colors.yellow.withOpacity(0.25) : Colors.amber.withOpacity(0.18))
+                    : (isHighContrast ? Colors.grey[900] : const Color(0xFF1E293B)),
+                borderRadius: BorderRadius.circular(14),
+                border: Border.all(
+                  color: _isSimulationMode ? Colors.amber : Colors.white24,
+                  width: 1.5,
+                ),
+              ),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Row(
+                    children: [
+                      Icon(
+                        Icons.directions_walk_rounded,
+                        color: _isSimulationMode ? Colors.amberAccent : Colors.white70,
+                        size: 26,
+                      ),
+                      const SizedBox(width: 10),
+                      Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            'โหมดจำลองการเดิน (Demo)',
+                            style: TextStyle(
+                              fontSize: 15 * acc.fontScale,
+                              fontWeight: FontWeight.bold,
+                              color: _isSimulationMode ? Colors.amberAccent : Colors.white,
+                            ),
+                          ),
+                          Text(
+                            _isSimulationMode ? 'จำลองก้าวเดิน เลี้ยวซ้าย/ขวา และสั่นเตือนในห้อง' : 'ใช้ดาวเทียม GPS สดจริงภายนอก',
+                            style: TextStyle(
+                              fontSize: 11 * acc.fontScale,
+                              color: Colors.white60,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+                  Switch(
+                    value: _isSimulationMode,
+                    activeColor: Colors.amberAccent,
+                    onChanged: (val) {
+                      setState(() {
+                        _isSimulationMode = val;
+                      });
+                      final acc = ref.read(accessibilityProvider);
+                      announceSpeech(
+                        val ? 'เปิดโหมดจำลองการเดินแล้ว เหมาะสำหรับทดสอบในห้องหรืออาคาร' : 'ปิดโหมดจำลอง สลับไปใช้ดาวเทียม GPS สดแล้ว',
+                        acc.voiceEnabled,
+                      );
+                    },
+                  ),
+                ],
+              ),
+            ),
 
             // Big Start Navigation Button
             SizedBox(
