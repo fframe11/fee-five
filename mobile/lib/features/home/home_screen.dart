@@ -33,6 +33,7 @@ class HomeScreen extends ConsumerStatefulWidget {
 
 class _HomeScreenState extends ConsumerState<HomeScreen> {
   int _currentIndex = 0;
+  String? _navigationDestination;
 
   void _onTabTapped(int index, AccessibilityState acc) {
     HapticService().turnGuidance();
@@ -46,6 +47,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
       context,
       onStartNavigation: (destination) {
         setState(() {
+          _navigationDestination = destination;
           _currentIndex = 1;
         });
       },
@@ -78,13 +80,18 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
               _currentIndex = targetId.clamp(0, 2);
             });
           },
+          onStartVoiceNav: _openVoiceAssistant,
         ),
       ),
       TabItem(
         id: 1,
         icon: Icons.record_voice_over_rounded,
         label: 'นำทางเสียง',
-        screen: const NavigationScreen(),
+        screen: NavigationScreen(
+          key: ValueKey(_navigationDestination ?? 'nav_default'),
+          initialDestination: _navigationDestination,
+          autoStart: _navigationDestination != null,
+        ),
       ),
       TabItem(
         id: 2,
@@ -100,25 +107,6 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
 
     return Scaffold(
       body: activeTabs[_currentIndex].screen,
-      floatingActionButtonLocation: FloatingActionButtonLocation.endFloat,
-      floatingActionButton: Semantics(
-        button: true,
-        label: 'สั่งการด้วยเสียง AI นิ้วดิจิทัล แตะเพื่อพูดสั่งงาน',
-        child: FloatingActionButton.extended(
-          backgroundColor: isHighContrast ? Colors.yellowAccent : const Color(0xFF2563EB),
-          foregroundColor: isHighContrast ? Colors.black : Colors.white,
-          elevation: 8,
-          onPressed: _openVoiceAssistant,
-          icon: const Icon(Icons.mic_rounded, size: 28),
-          label: Text(
-            '🎙️ สั่งด้วยเสียง',
-            style: TextStyle(
-              fontSize: 15 * acc.fontScale,
-              fontWeight: FontWeight.bold,
-            ),
-          ),
-        ),
-      ),
       bottomNavigationBar: BottomNavigationBar(
         currentIndex: _currentIndex,
         backgroundColor: isHighContrast ? Colors.black : Colors.white,
@@ -140,8 +128,12 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
 /// ═══ Ultra-Minimal Action-First Home Tab Content (Only 3 Giant Main Buttons) ═══
 class _HomeTabContent extends ConsumerStatefulWidget {
   final Function(int) onNavigateTab;
+  final VoidCallback onStartVoiceNav;
 
-  const _HomeTabContent({required this.onNavigateTab});
+  const _HomeTabContent({
+    required this.onNavigateTab,
+    required this.onStartVoiceNav,
+  });
 
   @override
   ConsumerState<_HomeTabContent> createState() => _HomeTabContentState();
@@ -306,8 +298,7 @@ class _HomeTabContentState extends ConsumerState<_HomeTabContent> {
                       ),
                       onPressed: () {
                         HapticService().startNavigation();
-                        announceSpeech('เปิดหน้านำทางด้วยเสียง', acc.voiceEnabled);
-                        widget.onNavigateTab(1); // Switch to Voice Navigation Tab
+                        widget.onStartVoiceNav();
                       },
                       child: Row(
                         children: [

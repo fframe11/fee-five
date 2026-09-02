@@ -23,10 +23,17 @@ import '../../core/services/place_search_service.dart';
 import '../../core/services/osrm_routing_service.dart';
 import '../../core/services/gis_data_service.dart';
 import '../../core/services/haptic_service.dart';
+import '../voice_control/voice_assistant_sheet.dart';
 import 'map_loader.dart';
 
 class NavigationScreen extends ConsumerStatefulWidget {
-  const NavigationScreen({super.key});
+  final String? initialDestination;
+  final bool autoStart;
+  const NavigationScreen({
+    super.key,
+    this.initialDestination,
+    this.autoStart = false,
+  });
 
   @override
   ConsumerState<NavigationScreen> createState() => _NavigationScreenState();
@@ -120,6 +127,11 @@ class _NavigationScreenState extends ConsumerState<NavigationScreen> with Ticker
     if (accState.accessibilityMode == 'visual') {
       _voiceOnlyMode = true;
     }
+    if (widget.initialDestination != null && widget.initialDestination!.isNotEmpty) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        _startNavigationToDestination(widget.initialDestination!);
+      });
+    }
     _detectAndSetCurrentLocation();
     _loadAccessibilityGISLayer();
     _checkRecoverySession();
@@ -155,6 +167,58 @@ class _NavigationScreenState extends ConsumerState<NavigationScreen> with Ticker
     _routeAnimation = Tween<double>(begin: 0.0, end: 1.0).animate(
       CurvedAnimation(parent: _routeController, curve: Curves.easeInOut),
     );
+  }
+
+  @override
+  void didUpdateWidget(covariant NavigationScreen oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.initialDestination != null &&
+        widget.initialDestination!.isNotEmpty &&
+        widget.initialDestination != oldWidget.initialDestination) {
+      _startNavigationToDestination(widget.initialDestination!);
+    }
+  }
+
+  Future<void> _startNavigationToDestination(String destination) async {
+    setState(() {
+      _destController.text = destination;
+      _isLoading = true;
+      _liveInstruction = 'กำลังค้นหา $destination ที่ใกล้ที่สุด...';
+    });
+
+    final acc = ref.read(accessibilityProvider);
+    announceSpeech('กำลังค้นหา $destination ที่ใกล้ที่สุดค่ะ', acc.voiceEnabled);
+
+    // 1. Resolve origin GPS
+    double originLat = 14.8818;
+    double originLng = 102.0245;
+    try {
+      final pos = await Geolocator.getCurrentPosition(
+        desiredAccuracy: LocationAccuracy.high,
+        timeLimit: const Duration(seconds: 4),
+      );
+      originLat = pos.latitude;
+      originLng = pos.longitude;
+    } catch (_) {}
+
+    // 2. Search for real nearest place matching destination (e.g. 7-Eleven, Hospital)
+    try {
+      final results = await PlaceSearchService.searchPlaces(destination, userLat: originLat, userLon: originLng);
+      if (results.isNotEmpty) {
+        final best = results.first;
+        setState(() {
+          _destController.text = best.name;
+          _customDestLat = best.lat;
+          _customDestLng = best.lon;
+        });
+        announceSpeech('พบ ${best.name} ปักหมุดปลายทางเรียบร้อยแล้วค่ะ', acc.voiceEnabled);
+      }
+    } catch (_) {}
+
+    // 3. Start navigation immediately
+    if (mounted) {
+      await _startNavigation();
+    }
   }
 
   Future<void> _detectAndSetCurrentLocation() async {
@@ -2370,7 +2434,15 @@ class _NavigationScreenState extends ConsumerState<NavigationScreen> with Ticker
                   icon: const Icon(Icons.mic_rounded, color: Colors.yellowAccent, size: 28),
                   tooltip: 'พูดชื่อสถานที่ปลายทาง',
                   onPressed: () {
-                    announceSpeech('กำลังเปิดระบบค้นหาด้วยเสียง กรุณาพูดชื่อสถานที่', true);
+                    VoiceAssistantSheet.show(
+                      context,
+                      onStartNavigation: (destination) {
+                        _startNavigationToDestination(destination);
+                      },
+                      onOpenCamera: () => Navigator.of(context).pushNamed('/vision'),
+                      onTriggerSos: () => Navigator.of(context).pushNamed('/sos'),
+                      onToggleVoice: (enable) => ref.read(accessibilityProvider.notifier).toggleVoice(enable),
+                    );
                   },
                 ),
                 filled: true,
@@ -2781,11 +2853,7 @@ class _NavigationScreenState extends ConsumerState<NavigationScreen> with Ticker
       backgroundColor: const Color(0xFF1E293B),
       side: const BorderSide(color: Colors.white30),
       onPressed: () {
-        setState(() {
-          _destController.text = query;
-        });
-        _onDestSearchChanged(query);
-        announceSpeech('เลือกปลายทาง $query', true);
+        _startNavigationToDestination(query);
       },
     );
   }
