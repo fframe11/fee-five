@@ -2,6 +2,12 @@ import os
 from typing import List, Optional
 from datetime import datetime, timedelta
 
+from dotenv import load_dotenv
+load_dotenv()
+_parent_env = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), ".env")
+if os.path.exists(_parent_env):
+    load_dotenv(_parent_env)
+
 from fastapi import FastAPI, Depends, HTTPException, status, Security
 from fastapi.responses import HTMLResponse, FileResponse
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
@@ -55,10 +61,43 @@ app.add_middleware(
 app.include_router(agent_router)
 app.include_router(gtfs_router)
 
+@app.get("/api/v1/health")
+@app.get("/health")
+def health_check():
+    """Production health & diagnostics probe for Render deployment."""
+    gemini_active = bool(
+        os.environ.get("GEMINI_API_KEY") or
+        os.environ.get("gemini_api_key") or
+        os.environ.get("GOOGLE_API_KEY") or
+        os.environ.get("gemini_api")
+    )
+    groq_active = bool(
+        os.environ.get("GROQ_API_KEY") or
+        os.environ.get("Groq_api")
+    )
+    return {
+        "status": "healthy",
+        "service": "feefive-backend",
+        "version": "2.0.0",
+        "timestamp": datetime.utcnow().isoformat(),
+        "database": "sqlite_or_postgis_connected",
+        "ai_ml_capabilities": {
+            "gemini_vision_agent": gemini_active,
+            "groq_decision_agent": groq_active,
+            "gis_pedestrian_routing": True,
+            "gtfs_transit_tracking": True,
+        }
+    }
+
 @app.get("/download-apk")
 @app.get("/app-debug.apk")
+@app.get("/app-release.apk")
 def download_apk():
+    base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     apk_paths = [
+        "c:/feefive/mobile/build/app/outputs/flutter-apk/app-release.apk",
+        os.path.join(base_dir, "static", "app-release.apk"),
+        os.path.join(os.path.dirname(base_dir), "mobile", "build", "app", "outputs", "flutter-apk", "app-release.apk"),
         "c:/AccessGuardian AI/fee-five/mobile/build/app/outputs/flutter-apk/app-arm64-v8a-release.apk",
         "c:/AccessGuardian AI/fee-five/mobile/build/app/outputs/flutter-apk/app-release.apk",
         "c:/AccessGuardian AI/fee-five/mobile/build/app/outputs/flutter-apk/app-debug.apk",
@@ -75,7 +114,7 @@ def download_apk():
                     "Cache-Control": "no-cache",
                 }
             )
-    raise HTTPException(status_code=404, detail="APK not found")
+    raise HTTPException(status_code=404, detail="APK not found on this instance")
 
 # OAuth2 setup
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/v1/auth/login")

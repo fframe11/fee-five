@@ -36,9 +36,10 @@ ENV PATH="/opt/venv/bin:$PATH" \
 RUN useradd --system --create-home appuser
 USER appuser
 
-# Copy application source code
+# Copy application source code and pre-seeded SQLite database
 COPY --chown=appuser:appuser app/ ./app/
+COPY --chown=appuser:appuser feefive.db* ./
 
-# Expose port and run application
+# Expose port and run application with dynamic port fallback
 EXPOSE 8000
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["sh", "-c", "uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000}"]
