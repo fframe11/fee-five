@@ -17,6 +17,7 @@ import '../../core/app_colors.dart';
 import '../../core/services/vision_trigger.dart';
 import '../../core/services/haptic_service.dart';
 import 'dart:convert';
+import 'package:image/image.dart' as img;
 import 'camera_loader.dart';
 
 class DetectedObstacle {
@@ -353,8 +354,19 @@ class _VisionAssistScreenState extends ConsumerState<VisionAssistScreen> with Ti
         if (_cameraController != null && _cameraController!.value.isInitialized) {
           try {
             final xFile = await _cameraController!.takePicture();
-            final bytes = await xFile.readAsBytes();
-            base64Img = base64Encode(bytes);
+            final rawBytes = await xFile.readAsBytes();
+            try {
+              final decoded = img.decodeImage(rawBytes);
+              if (decoded != null) {
+                final resized = img.copyResize(decoded, width: 640);
+                final jpgBytes = img.encodeJpg(resized, quality: 75);
+                base64Img = base64Encode(jpgBytes);
+              } else {
+                base64Img = base64Encode(rawBytes);
+              }
+            } catch (_) {
+              base64Img = base64Encode(rawBytes);
+            }
           } catch (e) {
             debugPrint('[Camera] Take picture error: $e');
           }
@@ -409,7 +421,7 @@ YOUR TASK (STAGE 2 PROOFING & REFINEMENT):
           final description = await ApiClient().analyzeVisionImage(
             base64Img,
             prompt: proofingPrompt,
-          ).timeout(const Duration(milliseconds: 1200));
+          ).timeout(const Duration(seconds: 6));
 
           String jsonStr = description.trim();
           final startIdx = jsonStr.indexOf('[');

@@ -14,16 +14,16 @@ class TfliteService {
 
   bool get isModelLoaded => _isModelLoaded;
 
-  // Fine-tuned YOLO11 AccessGuardian 8 classes matching data.yaml and best.pt
+  // Fine-tuned YOLO11 AccessGuardian 8 classes matching labelmap.txt and best.pt
   static const Map<int, String> accessibilityLabels = {
-    0: 'footpath',            // ทางเท้าคนเดิน
-    1: 'broken_footpath',     // ทางเท้าชำรุดทรุดตัว
-    2: 'zebra_crossing',      // ทางม้าลายและจุดข้ามถนน
-    3: 'traffic_light_red',   // สัญญาณไฟแดง หยุดรอ
-    4: 'traffic_light_green', // สัญญาณไฟเขียว ข้ามได้
-    5: 'stairs',              // บันได / สะพานลอย
-    6: 'obstacle',            // สิ่งกีดขวาง / เสาไฟ / ป้าย
-    7: 'ramp',                // ทางลาดชัน
+    0: 'broken_footpath',     // ทางเท้าชำรุดทรุดตัว / พื้นต่างระดับ
+    1: 'footpath',            // ทางเท้าปกติ
+    2: 'obstacle',            // เสาไฟ / เสาปูน / สิ่งกีดขวาง
+    3: 'stairs',              // บันได / ขั้นบันได
+    4: 'tactile_paving',      // เบรลล์บล็อกสำหรับคนตาบอด
+    5: 'traffic_light_green', // สัญญาณไฟเขียว
+    6: 'traffic_light_red',   // สัญญาณไฟแดง
+    7: 'zebra_crossing',      // ทางม้าลาย
   };
 
   Future<void> loadModel() async {
