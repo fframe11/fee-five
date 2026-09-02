@@ -255,7 +255,7 @@ class TfliteService {
   }
 
   /// Preprocess CameraImage frame to normalized float32 tensor [1, 640, 640, 3]
-  List<List<List<List<double>>>> _preprocessCameraImage(CameraImage image, int targetW, int targetH) {
+  dynamic _preprocessCameraImage(CameraImage image, int targetW, int targetH) {
     try {
       if (image.format.group == ImageFormatGroup.jpeg) {
         return _preprocessRawBytes(image.planes[0].bytes, targetW, targetH);
@@ -268,7 +268,7 @@ class TfliteService {
   }
 
   /// Preprocess Raw Bytes to real decoded normalized RGB float32 tensor [1, 640, 640, 3]
-  List<List<List<List<double>>>> _preprocessRawBytes(Uint8List bytes, int targetW, int targetH) {
+  dynamic _preprocessRawBytes(Uint8List bytes, int targetW, int targetH) {
     try {
       final decoded = img.decodeImage(bytes);
       if (decoded == null) {
@@ -276,41 +276,25 @@ class TfliteService {
       }
       final resized = img.copyResize(decoded, width: targetW, height: targetH);
 
-      final tensor = List.generate(
-        1,
-        (_) => List.generate(
-          targetH,
-          (y) => List.generate(
-            targetW,
-            (x) {
-              final pixel = resized.getPixel(x, y);
-              return [
-                pixel.r / 255.0,
-                pixel.g / 255.0,
-                pixel.b / 255.0,
-              ];
-            },
-          ),
-        ),
-      );
-      return tensor;
+      final tensorBuffer = Float32List(1 * targetH * targetW * 3);
+      int idx = 0;
+      for (int y = 0; y < targetH; y++) {
+        for (int x = 0; x < targetW; x++) {
+          final pixel = resized.getPixel(x, y);
+          tensorBuffer[idx++] = pixel.r / 255.0;
+          tensorBuffer[idx++] = pixel.g / 255.0;
+          tensorBuffer[idx++] = pixel.b / 255.0;
+        }
+      }
+      return tensorBuffer.reshape([1, targetH, targetW, 3]);
     } catch (e) {
       if (kDebugMode) debugPrint('[YOLO11 Preprocess] decode error: $e');
       return _createDefaultTensor(targetW, targetH);
     }
   }
 
-  List<List<List<List<double>>>> _createDefaultTensor(int targetW, int targetH) {
-    return List.generate(
-      1,
-      (_) => List.generate(
-        targetH,
-        (_) => List.generate(
-          targetW,
-          (_) => List<double>.filled(3, 0.5),
-        ),
-      ),
-    );
+  dynamic _createDefaultTensor(int targetW, int targetH) {
+    return Float32List(1 * targetH * targetW * 3).reshape([1, targetH, targetW, 3]);
   }
 
   void dispose() {

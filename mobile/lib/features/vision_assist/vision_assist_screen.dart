@@ -17,7 +17,6 @@ import '../../core/app_colors.dart';
 import '../../core/services/vision_trigger.dart';
 import '../../core/services/haptic_service.dart';
 import 'dart:convert';
-import 'package:image/image.dart' as img;
 import 'camera_loader.dart';
 
 class DetectedObstacle {
@@ -212,7 +211,7 @@ class _VisionAssistScreenState extends ConsumerState<VisionAssistScreen> with Ti
       
       _cameraController = CameraController(
         backCamera,
-        ResolutionPreset.medium,
+        ResolutionPreset.low,
         enableAudio: false,
         imageFormatGroup: ImageFormatGroup.jpeg,
       );
@@ -226,12 +225,6 @@ class _VisionAssistScreenState extends ConsumerState<VisionAssistScreen> with Ti
         setState(() {
           _hasCameraPermission = true;
           _isCameraInitialized = true;
-        });
-        // Auto-start scanning immediately for visually impaired users
-        Future.delayed(const Duration(milliseconds: 300), () {
-          if (mounted && !_isScanning) {
-            _startScanning();
-          }
         });
       }
     } catch (e) {
@@ -355,18 +348,7 @@ class _VisionAssistScreenState extends ConsumerState<VisionAssistScreen> with Ti
           try {
             final xFile = await _cameraController!.takePicture();
             final rawBytes = await xFile.readAsBytes();
-            try {
-              final decoded = img.decodeImage(rawBytes);
-              if (decoded != null) {
-                final resized = img.copyResize(decoded, width: 640);
-                final jpgBytes = img.encodeJpg(resized, quality: 75);
-                base64Img = base64Encode(jpgBytes);
-              } else {
-                base64Img = base64Encode(rawBytes);
-              }
-            } catch (_) {
-              base64Img = base64Encode(rawBytes);
-            }
+            base64Img = base64Encode(rawBytes);
           } catch (e) {
             debugPrint('[Camera] Take picture error: $e');
           }
@@ -448,12 +430,12 @@ YOUR TASK (STAGE 2 PROOFING & REFINEMENT):
       }
     } catch (e) {
       debugPrint('[Vision Pipeline] Frame capture error: $e');
-    }
-
-    if (mounted && _isScanning && stage1Candidates.isEmpty) {
-      setState(() {
-        _isAnalyzingShot = false;
-      });
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isAnalyzingShot = false;
+        });
+      }
     }
   }
 
@@ -850,13 +832,26 @@ YOUR TASK (STAGE 2 PROOFING & REFINEMENT):
     
     try {
       // 3. Make HTTP request to backend vision endpoint
-      final description = await ApiClient().analyzeVisionImage(base64Frame);
+      const thaiPrompt = 'คุณคือผู้ช่วยคนตาบอด อธิบายสิ่งกีดขวางหรือสภาพทางเดินข้างหน้าเป็นภาษาไทยสั้นๆ 1 ประโยค เพื่อความปลอดภัยในการเดิน';
+      final description = await ApiClient().analyzeVisionImage(base64Frame, prompt: thaiPrompt);
       
       // Close loading dialog
       if (mounted) Navigator.pop(context);
       
+      String cleanThaiSpeech = description;
+      if (description.trim().startsWith('[') || description.trim().startsWith('{')) {
+        try {
+          final decoded = jsonDecode(description.trim());
+          if (decoded is List && decoded.isNotEmpty) {
+            final first = decoded.first;
+            cleanThaiSpeech = first['proof_reason'] ?? 'พบ ${first['label']} ด้านหน้า';
+          }
+        } catch (_) {}
+      }
+      
       // 4. Speak response out loud
-      announceSpeech(description, acc.voiceEnabled);
+      announceSpeech(cleanThaiSpeech, acc.voiceEnabled);
+      HapticService().obstacleDetected();
       
       // 5. Show response dialog
       if (mounted) {
@@ -876,7 +871,7 @@ YOUR TASK (STAGE 2 PROOFING & REFINEMENT):
               ],
             ),
             content: Text(
-              description,
+              cleanThaiSpeech,
               style: TextStyle(color: acc.highContrast ? Colors.white70 : Colors.black87, fontSize: 16 * acc.fontScale),
             ),
             actions: [

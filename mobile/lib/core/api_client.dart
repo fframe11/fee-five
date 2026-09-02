@@ -159,15 +159,17 @@ class ApiClient {
           'image_base64': base64Image,
           'prompt': effectivePrompt,
         }),
-      ).timeout(const Duration(seconds: 3));
+      ).timeout(const Duration(seconds: 15));
 
       if (response.statusCode == 200) {
         final data = jsonDecode(response.body);
         final desc = data['description'] ?? '';
         if (desc.isNotEmpty) return desc;
+      } else {
+        debugPrint('[ApiClient] Vision backend error status: ${response.statusCode}, body: ${response.body}');
       }
-    } catch (_) {
-      // Local backend unreachable or on 4G/5G mobile cellular network -> fallback to Direct Cloud Vision
+    } catch (e) {
+      debugPrint('[ApiClient] Vision backend request error: $e');
     }
 
     // 2. Direct Groq Cloud Vision API Fallback (Guaranteed to work on 4G / 5G / Any network)
