@@ -594,7 +594,14 @@ def analyze_image(payload: VisionRequest):
     import json
     
     load_env()
-    prompt = payload.prompt or "คุณคือผู้ช่วยคนตาบอด อธิบายภาพถ่ายนี้และเตือนสิ่งกีดขวางเป็นภาษาไทยสั้นๆ 1 ประโยค"
+    default_prompt = (
+        "คุณคือระบบ AI ตรวจจับสิ่งกีดขวางและพื้นต่างระดับสำหรับผู้พิการทางสายตา\n"
+        "ภารกิจสำคัญ:\n"
+        "1. ตรวจสอบ 'พื้นต่างระดับ' (ขอบทางเท้า/ฟุตบาท/ทางลาด/บันได/หลุม/รอยแตก) ที่โมเดล YOLO ทั่วไปมองข้าม\n"
+        "2. ตรวจสอบสิ่งกีดขวางทางกายภาพทุกชนิด (เสาไฟ, ป้าย, มอเตอร์ไซค์, แผงลอย, กิ่งไม้, สายไฟห้อย)\n"
+        "3. อธิบายสิ่งที่อันตรายที่สุดเป็นภาษาไทยสั้นๆ 1-2 ประโยค พร้อมระบุตำแหน่ง (ซ้าย/ขวา/ตรงหน้า) เพื่อความปลอดภัยทันที"
+    )
+    prompt = payload.prompt or default_prompt
     
     # Ensure correct Base64 clean string
     img_data = payload.image_base64
@@ -605,7 +612,9 @@ def analyze_image(payload: VisionRequest):
     
     data_url = f"data:image/jpeg;base64,{raw_b64}"
     
-    # ─── PROVIDER 1: Google Gemini Vision API ───
+    raw_visual_desc = None
+
+    # ─── STAGE 1: Multimodal Vision Perception (Google Gemini Vision) ───
     gemini_key = os.environ.get("GEMINI_API_KEY") or os.environ.get("gemini_api_key") or os.environ.get("GOOGLE_API_KEY") or os.environ.get("gemini_api")
     if gemini_key:
         try:
@@ -636,9 +645,50 @@ def analyze_image(payload: VisionRequest):
                         elif '```' in description:
                             description = description.split('```')[1].split('```')[0].strip()
                         if description:
-                            return {"description": description, "provider": "gemini"}
+                            raw_visual_desc = description
+                            break
         except Exception as e:
-            print(f"[Vision Engine] Gemini fallback trigger: {e}")
+            print(f"[Vision Engine] Gemini vision error: {e}")
+
+    # ─── STAGE 2: Groq Actionable Synthesis & Reasoning Co-Pilot ───
+    groq_key = os.environ.get("Groq_api") or os.environ.get("GROQ_API_KEY")
+    if raw_visual_desc and groq_key:
+        try:
+            url = "https://api.groq.com/openai/v1/chat/completions"
+            headers = {
+                "Authorization": f"Bearer {groq_key}",
+                "Content-Type": "application/json",
+            }
+            body = {
+                "model": "openai/gpt-oss-120b",
+                "messages": [
+                    {
+                        "role": "system",
+                        "content": (
+                            "คุณคือระบบเตือนภัยฉุกเฉินสำหรับผู้พิการทางสายตา (Pedestrian Safety Co-Pilot) "
+                            "มีหน้าที่กลั่นกรองข้อมูลการมองเห็นให้เป็นคำเตือนภาษาไทยที่กระชับ ชัดเจน ไม่เกิน 15 คำ "
+                            "เน้นเตือน 'พื้นต่างระดับ' หรือ 'สิ่งกีดขวางอันตราย' พร้อมตำแหน่ง (ซ้าย/ขวา/ตรงหน้า) โดยตรง"
+                        )
+                    },
+                    {"role": "user", "content": f"ข้อมูลภาพตรวจจับได้ดังนี้: {raw_visual_desc}"}
+                ],
+                "temperature": 0.1
+            }
+            gr_resp = requests.post(url, headers=headers, json=body, timeout=6)
+            if gr_resp.status_code == 200:
+                gr_json = gr_resp.json()
+                actionable_alert = gr_json["choices"][0]["message"]["content"].strip()
+                return {
+                    "description": actionable_alert,
+                    "raw_analysis": raw_visual_desc,
+                    "provider": "gemini_groq_copilot"
+                }
+        except Exception as e:
+            print(f"[Vision Engine] Groq synthesis fallback: {e}")
+
+    # If Gemini succeeded without Groq synthesis, return Gemini directly
+    if raw_visual_desc:
+        return {"description": raw_visual_desc, "provider": "gemini"}
             
     # ─── PROVIDER 2: Groq Vision AI (Qwen / GPT-OSS) ───
     groq_key = os.environ.get("Groq_api") or os.environ.get("GROQ_API_KEY")
