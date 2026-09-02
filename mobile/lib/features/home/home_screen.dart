@@ -10,6 +10,7 @@ import '../navigation/navigation_screen.dart';
 import '../vision_assist/vision_assist_screen.dart';
 import '../gesture_sos/gesture_sos_screen.dart';
 import '../profile/profile_screen.dart';
+import '../voice_control/voice_assistant_sheet.dart';
 
 class TabItem {
   final int id; // 0: Home, 1: Voice Navigation, 2: Profile
@@ -40,6 +41,26 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     setState(() {
       _currentIndex = index;
     });
+  }
+
+  void _openVoiceAssistant() {
+    VoiceAssistantSheet.show(
+      context,
+      onStartNavigation: (destination) {
+        setState(() {
+          _currentIndex = 1;
+        });
+      },
+      onOpenCamera: () {
+        Navigator.of(context).pushNamed('/vision');
+      },
+      onTriggerSos: () {
+        Navigator.of(context).pushNamed('/sos');
+      },
+      onToggleVoice: (enable) {
+        ref.read(accessibilityProvider.notifier).setVoiceEnabled(enable);
+      },
+    );
   }
 
   @override
@@ -81,6 +102,25 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
 
     return Scaffold(
       body: activeTabs[_currentIndex].screen,
+      floatingActionButtonLocation: FloatingActionButtonLocation.endFloat,
+      floatingActionButton: Semantics(
+        button: true,
+        label: 'สั่งการด้วยเสียง AI นิ้วดิจิทัล แตะเพื่อพูดสั่งงาน',
+        child: FloatingActionButton.extended(
+          backgroundColor: isHighContrast ? Colors.yellowAccent : const Color(0xFF2563EB),
+          foregroundColor: isHighContrast ? Colors.black : Colors.white,
+          elevation: 8,
+          onPressed: _openVoiceAssistant,
+          icon: const Icon(Icons.mic_rounded, size: 28),
+          label: Text(
+            '🎙️ สั่งด้วยเสียง',
+            style: TextStyle(
+              fontSize: 15 * acc.fontScale,
+              fontWeight: FontWeight.bold,
+            ),
+          ),
+        ),
+      ),
       bottomNavigationBar: BottomNavigationBar(
         currentIndex: _currentIndex,
         backgroundColor: isHighContrast ? Colors.black : Colors.white,
