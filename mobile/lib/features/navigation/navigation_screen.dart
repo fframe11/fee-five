@@ -22,6 +22,7 @@ import '../../core/services/battery_manager.dart';
 import '../../core/services/place_search_service.dart';
 import '../../core/services/osrm_routing_service.dart';
 import '../../core/services/gis_data_service.dart';
+import '../../core/services/haptic_service.dart';
 import 'map_loader.dart';
 
 class NavigationScreen extends ConsumerStatefulWidget {
@@ -1190,54 +1191,32 @@ class _NavigationScreenState extends ConsumerState<NavigationScreen> with Ticker
                                 mainAxisSize: MainAxisSize.min,
                                 children: [
                                   Container(
+                                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                                     decoration: BoxDecoration(
-                                      shape: BoxShape.circle,
-                                      color: Colors.blue[800],
-                                      border: Border.all(color: Colors.white, width: 2.5),
-                                      boxShadow: const [BoxShadow(color: Colors.black38, blurRadius: 4)],
+                                      color: isHighContrast ? Colors.black : Colors.red[800],
+                                      borderRadius: BorderRadius.circular(8),
+                                      border: Border.all(color: Colors.white, width: 1.5),
+                                      boxShadow: const [BoxShadow(color: Colors.black45, blurRadius: 4)],
+                                    ),
+                                    child: Text(
+                                      _destController.text.isNotEmpty ? _destController.text : 'จุดหมาย',
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: const TextStyle(
+                                        color: Colors.white,
+                                        fontSize: 11,
+                                        fontWeight: FontWeight.bold,
+                                      ),
                                     ),
                                   ),
+                                  const Icon(Icons.location_on_rounded, color: Colors.red, size: 36),
                                 ],
-                              );
-                            },
-                          ),
-                        ),
-                        // Destination Target Marker
-                        if (hasDest)
-                          Marker(
-                            point: ll.LatLng(destLat, destLng),
-                            width: 140,
-                            height: 75,
-                            alignment: Alignment.topCenter,
-                            child: Column(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                Container(
-                                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                                  decoration: BoxDecoration(
-                                    color: isHighContrast ? Colors.black : Colors.red[800],
-                                    borderRadius: BorderRadius.circular(8),
-                                    border: Border.all(color: Colors.white, width: 1.5),
-                                    boxShadow: const [BoxShadow(color: Colors.black45, blurRadius: 4)],
-                                  ),
-                                  child: Text(
-                                    _destController.text.isNotEmpty ? _destController.text : 'จุดหมาย',
-                                    maxLines: 1,
-                                    overflow: TextOverflow.ellipsis,
-                                    style: const TextStyle(
-                                      color: Colors.white,
-                                      fontSize: 11,
-                                      fontWeight: FontWeight.bold,
-                                    ),
-                                  ),
-                                ),
-                                const Icon(Icons.location_on_rounded, color: Colors.red, size: 36),
-                              ],
+                              ),
                             ),
-                          ),
-                      ],
-                    ),
-                  ],
+                        ],
+                      ),
+                    ],
+                  ),
                 );
               },
             ),
