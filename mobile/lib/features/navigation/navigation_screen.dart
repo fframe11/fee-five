@@ -678,9 +678,8 @@ class _NavigationScreenState extends ConsumerState<NavigationScreen> with Ticker
       ).listen((Position pos) {
         if (!mounted || !_isNavigating) return;
 
-        // ป้องกัน GPS ผีหลอก (Jitter Filter)
-        if (pos.accuracy > 25.0) return; // ข้ามจุดที่ความแม่นยำต่ำ
-        if (pos.speed < 0.2) return; // ข้ามจุดที่ยืนนิ่ง (ความเร็วต่ำกว่า 0.2 m/s)
+        // ป้องกัน GPS ผีหลอก (Jitter Filter: ข้ามเฉพาะจุดที่ดาวเทียมหลุด)
+        if (pos.accuracy > 25.0) return; // ข้ามจุดที่ความแม่นยำต่ำเกินไป
 
         final currentLat = pos.latitude;
         final currentLng = pos.longitude;
@@ -859,13 +858,17 @@ class _NavigationScreenState extends ConsumerState<NavigationScreen> with Ticker
   }
 
   void _checkProactiveHazardAlerts(double currentLat, double currentLng, AccessibilityState acc, {double accuracy = 5.0, double speed = 1.2}) {
-    if (_gisBarriers.isEmpty) return;
+    final alertTargets = <dynamic>[
+      ..._gisBarriers,
+      ..._gisPoints.where((p) => p['type'] == 'traffic_light' || p['type'] == 'zebra_crossing'),
+    ];
+    if (alertTargets.isEmpty) return;
 
     double minDistance = double.infinity;
     Map<String, dynamic>? closestHazard;
     String closestHazardId = '';
 
-    for (final bar in _gisBarriers) {
+    for (final bar in alertTargets) {
       double? bLat = (bar['lat'] as num?)?.toDouble();
       double? bLon = (bar['lon'] as num?)?.toDouble();
       if (bLat == null && bar['location'] is Map) {
