@@ -614,7 +614,46 @@ def analyze_image(payload: VisionRequest):
     
     raw_visual_desc = None
 
-    # ─── STAGE 1: Multimodal Vision Perception (Google Gemini Vision) ───
+    # ─── PROVIDER 1: Groq Vision AI (PRIMARY: Ultra-Fast YOLO Enhancer) ───
+    # Groq LPU specializes in zero-shot vision inference: detecting level differences, curbs, and unseen obstacles
+    groq_key = os.environ.get("Groq_api") or os.environ.get("GROQ_API_KEY")
+    if groq_key:
+        try:
+            url = "https://api.groq.com/openai/v1/chat/completions"
+            headers = {
+                "Authorization": f"Bearer {groq_key}",
+                "Content-Type": "application/json",
+            }
+            body = {
+                "model": "qwen/qwen3.8-27b",
+                "messages": [
+                    {
+                        "role": "user",
+                        "content": [
+                            {"type": "text", "text": prompt},
+                            {"type": "image_url", "image_url": {"url": data_url}}
+                        ]
+                    }
+                ],
+                "temperature": 0.1
+            }
+            resp = requests.post(url, headers=headers, json=body, timeout=8)
+            if resp.status_code == 200:
+                res_json = resp.json()
+                description = res_json["choices"][0]["message"]["content"]
+                description = re.sub(r'<think>.*?</think>', '', description, flags=re.DOTALL).strip()
+                if '```json' in description:
+                    description = description.split('```json')[1].split('```')[0].strip()
+                elif '```' in description:
+                    description = description.split('```')[1].split('```')[0].strip()
+                if description:
+                    return {"description": description, "provider": "groq_yolo_enhancer"}
+            else:
+                print(f"[Vision Engine] Groq primary error ({resp.status_code}): {resp.text}")
+        except Exception as e:
+            print(f"[Vision Engine] Groq primary exception: {e}")
+
+    # ─── PROVIDER 2: Google Gemini Vision API (FALLBACK Vision) ───
     gemini_key = os.environ.get("GEMINI_API_KEY") or os.environ.get("gemini_api_key") or os.environ.get("GOOGLE_API_KEY") or os.environ.get("gemini_api")
     if gemini_key:
         try:
@@ -645,91 +684,12 @@ def analyze_image(payload: VisionRequest):
                         elif '```' in description:
                             description = description.split('```')[1].split('```')[0].strip()
                         if description:
-                            raw_visual_desc = description
-                            break
+                            return {"description": description, "provider": "gemini_fallback"}
         except Exception as e:
-            print(f"[Vision Engine] Gemini vision error: {e}")
-
-    # ─── STAGE 2: Groq Actionable Synthesis & Reasoning Co-Pilot ───
-    groq_key = os.environ.get("Groq_api") or os.environ.get("GROQ_API_KEY")
-    if raw_visual_desc and groq_key:
-        try:
-            url = "https://api.groq.com/openai/v1/chat/completions"
-            headers = {
-                "Authorization": f"Bearer {groq_key}",
-                "Content-Type": "application/json",
-            }
-            body = {
-                "model": "openai/gpt-oss-120b",
-                "messages": [
-                    {
-                        "role": "system",
-                        "content": (
-                            "คุณคือระบบเตือนภัยฉุกเฉินสำหรับผู้พิการทางสายตา (Pedestrian Safety Co-Pilot) "
-                            "มีหน้าที่กลั่นกรองข้อมูลการมองเห็นให้เป็นคำเตือนภาษาไทยที่กระชับ ชัดเจน ไม่เกิน 15 คำ "
-                            "เน้นเตือน 'พื้นต่างระดับ' หรือ 'สิ่งกีดขวางอันตราย' พร้อมตำแหน่ง (ซ้าย/ขวา/ตรงหน้า) โดยตรง"
-                        )
-                    },
-                    {"role": "user", "content": f"ข้อมูลภาพตรวจจับได้ดังนี้: {raw_visual_desc}"}
-                ],
-                "temperature": 0.1
-            }
-            gr_resp = requests.post(url, headers=headers, json=body, timeout=6)
-            if gr_resp.status_code == 200:
-                gr_json = gr_resp.json()
-                actionable_alert = gr_json["choices"][0]["message"]["content"].strip()
-                return {
-                    "description": actionable_alert,
-                    "raw_analysis": raw_visual_desc,
-                    "provider": "gemini_groq_copilot"
-                }
-        except Exception as e:
-            print(f"[Vision Engine] Groq synthesis fallback: {e}")
-
-    # If Gemini succeeded without Groq synthesis, return Gemini directly
-    if raw_visual_desc:
-        return {"description": raw_visual_desc, "provider": "gemini"}
-            
-    # ─── PROVIDER 2: Groq Vision AI (Qwen / GPT-OSS) ───
-    groq_key = os.environ.get("Groq_api") or os.environ.get("GROQ_API_KEY")
-    if groq_key:
-        try:
-            url = "https://api.groq.com/openai/v1/chat/completions"
-            headers = {
-                "Authorization": f"Bearer {groq_key}",
-                "Content-Type": "application/json",
-            }
-            body = {
-                "model": "qwen/qwen3.8-27b",
-                "messages": [
-                    {
-                        "role": "user",
-                        "content": [
-                            {"type": "text", "text": prompt},
-                            {"type": "image_url", "image_url": {"url": data_url}}
-                        ]
-                    }
-                ],
-                "temperature": 0.1
-            }
-            resp = requests.post(url, headers=headers, json=body, timeout=12)
-            if resp.status_code == 200:
-                res_json = resp.json()
-                description = res_json["choices"][0]["message"]["content"]
-                description = re.sub(r'<think>.*?</think>', '', description, flags=re.DOTALL).strip()
-                if '```json' in description:
-                    description = description.split('```json')[1].split('```')[0].strip()
-                elif '```' in description:
-                    description = description.split('```')[1].split('```')[0].strip()
-                return {"description": description, "provider": "groq"}
-            else:
-                print(f"[Vision Engine] Groq error ({resp.status_code}): {resp.text}")
-        except Exception as e:
-            print(f"[Vision Engine] Groq Exception: {e}")
-
+            print(f"[Vision Engine] Gemini fallback error: {e}")
     raise HTTPException(
         status_code=500,
-        detail="Vision AI proofing failed across all providers (Gemini & Groq)."
+        detail="Vision AI proofing failed across all providers (Groq & Gemini)."
     )
 
 
