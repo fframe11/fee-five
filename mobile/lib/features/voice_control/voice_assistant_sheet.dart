@@ -1,6 +1,5 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../core/accessibility_notifier.dart';
 import '../../core/api_client.dart';
@@ -151,7 +150,7 @@ class _VoiceAssistantSheetState extends ConsumerState<VoiceAssistantSheet> with 
         _aiStatusMessage = aiMessage;
       });
 
-      await announceSpeech(aiMessage, acc.voiceEnabled);
+      announceSpeech(aiMessage, acc.voiceEnabled);
 
       if (!mounted) return;
       await Future.delayed(const Duration(milliseconds: 600));

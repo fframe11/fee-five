@@ -7,8 +7,6 @@ import '../../core/tts_helper.dart';
 import '../../core/services/haptic_service.dart';
 
 import '../navigation/navigation_screen.dart';
-import '../vision_assist/vision_assist_screen.dart';
-import '../gesture_sos/gesture_sos_screen.dart';
 import '../profile/profile_screen.dart';
 import '../voice_control/voice_assistant_sheet.dart';
 
@@ -58,7 +56,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
         Navigator.of(context).pushNamed('/sos');
       },
       onToggleVoice: (enable) {
-        ref.read(accessibilityProvider.notifier).setVoiceEnabled(enable);
+        ref.read(accessibilityProvider.notifier).toggleVoice(enable);
       },
     );
   }
