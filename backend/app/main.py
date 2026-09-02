@@ -1201,9 +1201,15 @@ def get_multi_modal_recommendations(payload: MultiModalRequest, db: Session = De
 @app.get("/dashboard", response_class=HTMLResponse, tags=["Dashboard"])
 def get_command_dashboard():
     """Serves the interactive City Accessibility Command Center Web Dashboard."""
-    dashboard_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "static", "dashboard.html")
-    if os.path.exists(dashboard_path):
-        return FileResponse(dashboard_path, media_type="text/html")
+    dashboard_paths = [
+        os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "static", "dashboard.html"),
+        os.path.join(os.getcwd(), "static", "dashboard.html"),
+        os.path.join(os.path.dirname(os.path.abspath(__file__)), "static", "dashboard.html"),
+        "/app/static/dashboard.html",
+    ]
+    for p in dashboard_paths:
+        if os.path.exists(p):
+            return FileResponse(p, media_type="text/html")
     return HTMLResponse("<h2>Dashboard file not found</h2>", status_code=404)
 
 

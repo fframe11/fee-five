@@ -36,8 +36,9 @@ ENV PATH="/opt/venv/bin:$PATH" \
 RUN useradd --system --create-home appuser && chown -R appuser:appuser /app && chmod 777 /app
 USER appuser
 
-# Copy application source code and pre-seeded SQLite database
+# Copy application source code, static assets, and pre-seeded SQLite database
 COPY --chown=appuser:appuser app/ ./app/
+COPY --chown=appuser:appuser static/ ./static/
 COPY --chown=appuser:appuser feefive.db* ./
 
 # Expose port and run application with dynamic port fallback
