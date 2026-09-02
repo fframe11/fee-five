@@ -232,35 +232,8 @@ def _rule_based_fallback(user_message: str) -> dict:
 
 def _call_llm(system_prompt: str, user_message: str) -> dict:
     import re
-    # ─── PROVIDER 1: Groq LPU (Qwen 3.8 27B / LLaMA) — Ultra-fast 0.5s dialect understanding ───
-    groq_key = _load_api_key()
-    if groq_key:
-        for model_id in ["qwen/qwen3.8-27b", "openai/gpt-oss-120b", "qwen/qwen3.6-27b"]:
-            try:
-                payload = {
-                    "model": model_id,
-                    "messages": [
-                        {"role": "system", "content": system_prompt},
-                        {"role": "user",   "content": user_message},
-                    ],
-                    "temperature": 0.1,
-                    "max_tokens": 800,
-                    "response_format": {"type": "json_object"},
-                }
-                req = urllib.request.Request(
-                    "https://api.groq.com/openai/v1/chat/completions",
-                    data=json.dumps(payload).encode("utf-8"),
-                    headers={"Authorization": f"Bearer {groq_key}", "Content-Type": "application/json", "User-Agent": "TAM-Agent/1.0"},
-                    method="POST",
-                )
-                with urllib.request.urlopen(req, timeout=4) as resp:
-                    body = json.loads(resp.read().decode("utf-8"))
-                    content = body["choices"][0]["message"]["content"]
-                    return json.loads(content)
-            except Exception as e:
-                print(f"[Agent Brain] Groq ({model_id}) error: {e}")
-
-    # ─── PROVIDER 2: Google Gemini (3.6-flash / flash-latest) ───
+    # ─── PRIMARY & SOLE AGENT BRAIN: Google Gemini (3.6-flash / flash-latest / 3.7-flash) ───
+    # Note: Groq is strictly reserved exclusively for Camera Vision analysis in /api/v1/vision/analyze
     gemini_key = _load_gemini_key()
     if gemini_key:
         for model_name in ["gemini-3.6-flash", "gemini-flash-latest", "gemini-3.7-flash"]:
@@ -280,7 +253,7 @@ def _call_llm(system_prompt: str, user_message: str) -> dict:
                     headers={"Content-Type": "application/json", "User-Agent": "TAM-Agent/1.0"},
                     method="POST"
                 )
-                with urllib.request.urlopen(req, timeout=5) as resp:
+                with urllib.request.urlopen(req, timeout=6) as resp:
                     data = json.loads(resp.read().decode("utf-8"))
                     text = data["candidates"][0]["content"]["parts"][0]["text"].strip()
                     if text.startswith("```"):
@@ -290,7 +263,7 @@ def _call_llm(system_prompt: str, user_message: str) -> dict:
             except Exception as e:
                 print(f"[Agent Brain] Gemini ({model_name}) error: {e}")
 
-    # ─── PROVIDER 3: Zero-Latency Local Dialect Intent Fallback ───
+    # ─── LOCAL OFFLINE FALLBACK: Zero-Latency Dialect Intent Engine ───
     print("[Agent Brain] Switching to Zero-Latency Local Dialect Intent Fallback.")
     return _rule_based_fallback(user_message)
 
